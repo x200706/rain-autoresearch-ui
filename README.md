@@ -1,10 +1,8 @@
 # Rain Autoresearch UI（互動原型）
 
-不用寫程式，就能幫測站降雨模型（雙 LightGBM 有雨／無雨 gate ＋ WMAE LSTM）做深度學習調參的操作介面。
+不用寫程式，就能幫測站降雨模型做深度學習調參的操作介面。
 
-**線上試玩**：開啟 GitHub Pages（Settings → Pages → Deploy from branch → `main` / root）後，網址是 https://x200706.github.io/rain-autoresearch-ui/。也可以直接用瀏覽器打開 `index.html`。
-
-![介面截圖](docs/screenshot.png)
+[線上Demo](https://x200706.github.io/rain-autoresearch-ui/)
 
 ## 它做什麼
 
@@ -19,7 +17,6 @@
 5. **看結果**：收斂圖、`results.tsv`（best 標藍、守門擋下標紅、快取標灰）、測站資訊卡、學習紀錄、消融比較表、Hermes 日誌；右側可調閱歷代實驗並把舊設定載回左側。
 
 ## 原型裡有什麼
-
 - 三個測站的真實實驗紀錄（訓練期指標）：467590 恆春、467490 臺中、467571。用預設設定選這三站會命中快取。
 - 上傳 CSV 會在瀏覽器裡實際檢查欄位（`觀測時間(hour)`、`降水量(mm)`）和 ≥ 門檻的樣本數，檔案不會上傳到任何地方。
 - 模型清單會即時從 OpenRouter 公開 API 載入，連不到時改用內建清單。
