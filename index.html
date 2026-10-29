@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rain Autoresearch</title>
+<meta name="description" content="不用寫程式的降雨深度學習自動調參：UI 收集設定 → 改寫代理技能 → 組成 shell 指令交給 Hermes 執行。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0B0E13;--bar:#0F131A;--panel:#0D1117;--side:#090C10;--editor:#0B0E13;--term:#06080B;
+  --input:#141A23;--border:#1E2632;--border-strong:#334155;--sel:#0F2547;--text:#C5D0DE;--muted:#8592A6;
+  --line-no:#76839A;--accent:#4D8EF7;--btn:#1F6FEB;--btn-text:#FFFFFF;--key:#79B8FF;--str:#A5D6FF;--fn:#E3B341;
+  --token:#58A6FF;--token-bg:rgba(88,166,255,.12);--ok:#3FB950;--err:#F85149;--warn:#D29922;--best-row:rgba(77,142,247,.10);
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:'Segoe UI',system-ui,-apple-system,'Noto Sans TC','PingFang TC','Microsoft JhengHei',sans-serif;
+  color-scheme:dark;
+}
+:root[data-theme="light"]{
+  --bg:#F5F8FC;--bar:#E8EEF6;--panel:#EEF3F9;--side:#E8EEF6;--editor:#FFFFFF;--term:#EEF3F9;
+  --input:#FFFFFF;--border:#CAD5E3;--border-strong:#9AAAC0;--sel:#D3E4FA;--text:#1A2233;--muted:#56637A;
+  --line-no:#6E7681;--accent:#005FB8;--btn:#005FB8;--key:#0451A5;--str:#A31515;--fn:#795E26;
+  --token:#005FB8;--token-bg:rgba(0,95,184,.10);--ok:#2E7D32;--err:#B3261E;--warn:#8A6100;--best-row:rgba(0,95,184,.08);
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
+a{color:var(--accent)}
+button,input,select,textarea{font:inherit;color:inherit}
+code,.mono{font-family:var(--mono)}
+.app{min-height:100vh;display:flex;flex-direction:column}
+header.top{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:10px 20px;background:var(--bar);border-bottom:1px solid var(--border)}
+header.top h1{margin:0;font-size:15px;font-weight:600}
+.grow{flex-grow:1}
+.muted{color:var(--muted)}
+.small{font-size:12px}
+.body{flex-grow:1;display:flex;flex-wrap:wrap;align-items:stretch}
+aside.left{flex:1 1 380px;max-width:420px;min-width:0;padding:20px;display:flex;flex-direction:column;gap:22px;background:var(--panel);border-right:1px solid var(--border)}
+main{flex:999 1 560px;min-width:0;padding:20px 24px;display:flex;flex-direction:column;gap:18px}
+nav.right{flex:1 1 240px;max-width:290px;min-width:0;padding:20px 12px;display:flex;flex-direction:column;gap:10px;background:var(--side);border-left:1px solid var(--border)}
+@media (max-width:860px){aside.left,nav.right{max-width:none;border:0}main{padding:16px}}
+section.blk{display:flex;flex-direction:column;gap:10px}
+h2.lbl{margin:0;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:2px;color:var(--accent)}
+h2.lbl .tok{letter-spacing:0}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:13px}
+.inp{min-height:34px;padding:6px 10px;border-radius:3px;border:1px solid var(--border);background:var(--input);color:var(--text);min-width:0;width:100%}
+textarea.inp{resize:vertical;line-height:1.5}
+.inp:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.row{display:flex;gap:6px;align-items:center}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.btn{min-height:34px;padding:0 12px;border-radius:3px;border:1px solid var(--border);background:var(--input);cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--border-strong)}
+.btn.primary{background:var(--btn);border-color:var(--btn);color:var(--btn-text);font-weight:600}
+.btn.big{min-height:44px;font-size:14px;width:100%;display:flex;align-items:center;justify-content:center;gap:8px}
+.seg{display:flex;border:1px solid var(--border);border-radius:3px;overflow:hidden}
+.seg button{flex:1 1 0;min-height:34px;padding:4px 12px;border:0;background:var(--input);cursor:pointer;font-size:12px;white-space:nowrap}
+.seg button[aria-pressed="true"]{background:var(--btn);color:var(--btn-text);font-weight:600}
+.drop{display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 12px;border-radius:4px;border:1px dashed var(--border-strong);background:var(--input);text-align:center;cursor:pointer}
+.drop.over{border-color:var(--accent);background:var(--sel)}
+.chip{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:3px;background:var(--sel);font-family:var(--mono);font-size:12px}
+.tok{font-family:var(--mono);color:var(--token)}
+.tokbg{font-family:var(--mono);color:var(--token);background:var(--token-bg);border-radius:2px;padding:0 2px}
+.chk{display:flex;gap:8px;align-items:flex-start;padding:6px 8px;border-radius:3px;border:1px solid var(--border);background:var(--input);font-size:13px;cursor:pointer}
+.box{border:1px solid var(--border);border-radius:4px;background:var(--panel)}
+.checks{display:flex;flex-direction:column;gap:4px;padding:10px 12px;border-radius:4px;border:1px solid var(--border);background:var(--editor);font-size:12px}
+.checks div{display:flex;gap:8px;align-items:baseline}
+.checks b{flex:0 0 14px}
+.cache{display:flex;flex-direction:column;gap:8px;padding:10px 12px;border-radius:4px;border:1px dashed var(--token);background:var(--token-bg);font-size:12px;line-height:1.5}
+.cache .head{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-weight:600;letter-spacing:2px;color:var(--accent)}
+.cache.miss{border-color:var(--border-strong);background:transparent}
+.cache.miss .head{color:var(--muted)}
+.term{padding:10px 12px;border-radius:4px;background:var(--term);border:1px solid var(--border);font-family:var(--mono);font-size:12px;line-height:19px;white-space:pre;overflow-x:auto}
+.term .p{color:var(--ok)}.term .c{color:var(--fn)}.term .k{color:var(--key)}.term .s{color:var(--str)}.term .m{color:var(--muted)}
+.runcard{display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:4px;border:1px solid var(--accent);background:var(--sel)}
+.bar{position:relative;height:4px;border-radius:2px;background:var(--border);overflow:hidden}
+.bar i{position:absolute;left:0;top:0;width:40%;height:4px;border-radius:2px;background:var(--accent);animation:slide 1.6s ease-in-out infinite}
+.slots{display:flex;gap:4px}.slots span{flex:1 1 0;height:10px;border-radius:2px;background:var(--border)}
+.slots .done{background:var(--ok)}.slots .now{background:var(--accent);animation:pulse 1.2s ease-in-out infinite}
+.spin{animation:spin 1s linear infinite}
+@keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(250%)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%,100%{opacity:.35}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.bar i,.spin,.slots .now{animation:none}}
+.tabs{display:flex;flex-wrap:wrap;border-bottom:1px solid var(--border)}
+.tabs button{min-height:36px;padding:0 16px;border:0;background:transparent;cursor:pointer;font-family:var(--mono);font-size:12px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs button[aria-selected="true"]{color:var(--text);border-bottom-color:var(--accent);font-weight:600}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:12px}
+.stat{padding:12px 14px;border-radius:4px;border:1px solid var(--border);background:var(--panel);display:flex;flex-direction:column;gap:4px;min-width:0}
+.stat .v{font-size:22px;font-weight:600;font-family:var(--mono)}
+.stat .s{font-size:11px;color:var(--muted)}
+.card-h{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border)}
+.card-h h3{margin:0;font-size:14px;font-weight:600}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
+th,td{padding:6px 8px;text-align:right;white-space:nowrap}
+th{color:var(--muted);font-weight:600;padding-top:8px;padding-bottom:8px}
+th:first-child,td:first-child{text-align:left;padding-left:16px}
+th.l,td.l{text-align:left}
+tbody tr{border-top:1px solid var(--border)}
+tr.best{background:var(--best-row)}
+.st-best{color:var(--accent)}.st-guard_fail{color:var(--err)}.st-crash{color:var(--err)}.st-baseline{color:var(--muted)}
+pre.file{margin:0;padding:14px 16px;min-height:220px;max-height:560px;overflow:auto;background:var(--editor);font-family:var(--mono);font-size:12px;line-height:20px;white-space:pre-wrap}
+.ftabs{display:flex;flex-wrap:wrap;background:var(--bar);border-bottom:1px solid var(--border)}
+.ftabs button{min-height:36px;padding:0 14px;border:0;background:transparent;cursor:pointer;font-family:var(--mono);font-size:12px;color:var(--muted)}
+.ftabs button[aria-selected="true"]{background:var(--editor);color:var(--text);box-shadow:inset 0 2px 0 var(--accent)}
+.hist{display:flex;flex-direction:column;gap:3px;width:100%;padding:10px;border-radius:3px;cursor:pointer;text-align:left;background:transparent;border:1px solid transparent}
+.hist[aria-current="true"]{background:var(--sel);border-color:var(--accent)}
+.hist:hover{border-color:var(--border-strong)}
+.dot{width:8px;height:8px;border-radius:4px;flex:0 0 8px}
+.pill{padding:2px 8px;border-radius:10px;font-size:12px;border:1px solid currentColor}
+footer.status{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4px 16px;background:var(--bar);color:var(--accent);border-top:1px solid var(--border);font-family:var(--mono);font-size:12px}
+.toast{position:fixed;left:50%;bottom:40px;transform:translateX(-50%);padding:10px 16px;border-radius:4px;background:var(--btn);color:#fff;font-size:13px;box-shadow:0 6px 24px rgba(0,0,0,.35);opacity:0;pointer-events:none;transition:opacity .2s}
+.toast.show{opacity:1}
+.demo-note{font-size:12px;color:var(--warn)}
+.chart-legend{display:flex;flex-wrap:wrap;gap:16px;font-size:12px;color:var(--muted)}
+.chart-legend span{display:flex;align-items:center;gap:6px}
+.chart-legend i{display:inline-block}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 15a4 4 0 0 1-.5-8A6 6 0 0 1 18 8a3.5 3.5 0 0 1 0 7"/><path d="M9 18l-1 3"/><path d="M13 18l-1 3"/><path d="M17 18l-1 3"/></svg>
+    <h1>Rain Autoresearch</h1>
+    <span class="muted small">測站降雨模型 · LSTM 自動調參 · 互動原型</span>
+    <div class="grow"></div>
+    <a class="small" href="https://github.com/x200706/rain-autoresearch-ui" id="repoLink">GitHub</a>
+    <button class="btn row" id="themeBtn" type="button" aria-label="切換深淺色">
+      <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      <span id="themeLabel">深色</span>
+    </button>
+  </header>
+
+  <div class="body">
+    <aside class="left">
+      <section class="blk">
+        <h2 class="lbl">1 · HERMES 代理（OPENROUTER）</h2>
+        <label class="f">API Key
+          <div class="row">
+            <input class="inp mono" id="apiKey" type="password" placeholder="sk-or-v1-…" autocomplete="off" style="font-size:12px">
+          </div>
+          <span class="small muted">原型只在你的瀏覽器裡檢查格式，不會送出。</span>
+        </label>
+        <label class="f">代理模型
+          <input class="inp" id="model" list="modelList" value="anthropic/claude-sonnet-4.5">
+          <datalist id="modelList"></datalist>
+          <span class="small muted" id="modelSrc">載入 OpenRouter 模型清單中…</span>
+        </label>
+      </section>
+
+      <section class="blk">
+        <h2 class="lbl">2 · 測站資料</h2>
+        <label class="drop" id="drop">
+          <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 20h16"/></svg>
+          <span style="font-size:13px">拖曳測站 CSV，或<u style="color:var(--accent)">選擇檔案</u></span>
+          <span class="small muted">逐時觀測 · 檔名即站號（例：467590.csv）</span>
+          <input type="file" id="file" accept=".csv" class="sr">
+        </label>
+        <label class="f">或使用已跑過的測站
+          <select class="inp" id="stationSel"></select>
+        </label>
+        <div class="chip" id="fileChip"><span id="fileOk" style="color:var(--ok)">✓</span><span class="grow" id="fileName"></span><span class="muted" id="fileRows"></span></div>
+        <div class="row" style="gap:10px;font-size:13px">
+          <span>訓練／測試切分</span>
+          <div class="seg" role="group" aria-label="RAIN_SPLIT">
+            <button type="button" data-split="82" aria-pressed="true">8 : 2</button>
+            <button type="button" data-split="73" aria-pressed="false">7 : 3</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="blk">
+        <div class="row" style="align-items:baseline">
+          <h2 class="lbl">3 · 代理技能模板</h2>
+          <div class="grow"></div>
+          <button class="btn small" type="button" id="resetTpl" style="min-height:28px">還原</button>
+        </div>
+        <textarea class="inp mono" id="tpl" rows="14" spellcheck="false" style="font-size:12px;background:var(--editor)"></textarea>
+        <div class="small muted">用 <span class="tok">[[欄位]]</span> 標記可替換處：<span id="tokList"></span></div>
+      </section>
+
+      <section class="blk">
+        <h2 class="lbl">4 · 主目標 <span class="tok">[[MAIN_GOAL]]</span></h2>
+        <div class="grid2">
+          <label class="f" style="font-size:12px">指標
+            <select class="inp" id="metric">
+              <option value="mae">MAE（越低越好）</option>
+              <option value="rmse">RMSE（越低越好）</option>
+              <option value="under">低估筆數（越少越好）</option>
+            </select>
+          </label>
+          <label class="f" style="font-size:12px">實際雨量門檻 ≥ (mm)
+            <input class="inp" id="thr" type="number" min="1" max="200" value="40">
+          </label>
+        </div>
+        <div class="small muted">→ <code id="goalKey" style="color:var(--key)">mae_ge40mm</code>：<span id="goalDesc"></span></div>
+      </section>
+
+      <section class="blk">
+        <h2 class="lbl">5 · 副目標（守門） <span class="tok">[[SUB_GOALS]]</span></h2>
+        <div class="seg" role="group" aria-label="副目標寫法" id="subSeg">
+          <button type="button" data-mode="preset" aria-pressed="true">預設三種</button>
+          <button type="button" data-mode="semantic" aria-pressed="false">語意描述</button>
+          <button type="button" data-mode="free" aria-pressed="false">自由</button>
+        </div>
+        <div id="subPreset" style="display:flex;flex-direction:column;gap:6px">
+          <label class="chk"><input type="checkbox" value="under" checked><span><span class="mono" style="color:var(--key)">under</span><br><span class="small muted">AE ≥ 20 mm 的低估筆數不多於第 1 代</span></span></label>
+          <label class="chk"><input type="checkbox" value="total" checked><span><span class="mono" style="color:var(--key)">total</span><br><span class="small muted">AE ≥ 20 mm 的高估＋低估筆數不多於第 1 代</span></span></label>
+          <label class="chk"><input type="checkbox" value="rmse" checked><span><span class="mono" style="color:var(--key)">rmse</span><br><span class="small muted">整體 RMSE 不劣於第 1 代</span></span></label>
+          <span class="small muted">勾幾種就各跑一次完整搜尋（消融實驗）</span>
+        </div>
+        <textarea class="inp" id="subText" rows="4" hidden placeholder="用一句話描述你在意的副作用，例如：大雨時寧可高估也不要低估，整體誤差不能比原本差太多"></textarea>
+      </section>
+
+      <section class="blk">
+        <h2 class="lbl">6 · 演化參數</h2>
+        <div class="grid2">
+          <label class="f" style="font-size:12px"><span>最多代數 <span class="tok">[[MAX_GEN]]</span></span><input class="inp" id="maxGen" type="number" min="2" max="50" value="20"></label>
+          <label class="f" style="font-size:12px"><span>早停 <span class="tok">[[PATIENCE]]</span></span><input class="inp" id="patience" type="number" min="1" max="10" value="3"></label>
+          <label class="f" style="font-size:12px"><span>每代子代 <span class="tok">[[CHILDREN]]</span></span><input class="inp" id="children" type="number" min="2" max="32" value="8"></label>
+          <label class="f" style="font-size:12px"><span>同時訓練 <span class="tok">[[PARALLEL]]</span></span><input class="inp" id="parallel" type="number" min="1" max="8" value="3"></label>
+        </div>
+        <span class="small muted">固定不調：突變率 1/14、SEED 42、學習率 0.001、Dropout 0.2、凍結的 LightGBM gate</span>
+      </section>
+
+      <section class="blk">
+        <h2 class="lbl">7 · 格式檢查</h2>
+        <div class="checks" id="checks" aria-live="polite"></div>
+        <div class="cache" id="cacheCard">
+          <div class="head">
+            <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
+            <span id="cacheHead">CACHE</span>
+          </div>
+          <span id="cacheMsg"></span>
+          <code class="muted" id="cacheHash"></code>
+        </div>
+        <button class="btn primary big" type="button" id="startBtn">
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4l13 8-13 8z"/></svg>
+          <span id="startLabel">開始最佳化 Optimize</span>
+        </button>
+        <div class="runcard" id="runCard" hidden>
+          <div class="row" style="gap:8px;font-size:13px">
+            <svg class="spin" aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round"><path d="M12 3a9 9 0 1 1-9 9"/></svg>
+            <b>Hermes 執行中</b><span class="grow"></span><span class="mono small muted" id="runClock">00:00:00</span>
+          </div>
+          <div class="small" id="runWhat"></div>
+          <div class="bar"><i></i></div>
+          <div class="slots" id="slots"></div>
+          <div class="demo-note">展示模式：靜態網站不會真的訓練，只模擬等待畫面。實際執行請複製下方指令到本機。</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <div class="row"><span class="small muted grow">組合後送到終端的 shell 指令</span>
+            <button class="btn small" type="button" id="copyCmd" style="min-height:28px">複製</button>
+            <button class="btn small" type="button" id="dlSkill" style="min-height:28px">下載 SKILL.md</button></div>
+          <div class="term" id="cmd"></div>
+        </div>
+      </section>
+    </aside>
+
+    <main>
+      <div class="row" style="flex-wrap:wrap;gap:12px">
+        <h2 style="margin:0;font-size:18px;font-weight:600"><span class="mono" id="stId"></span> <span id="stName"></span></h2>
+        <span class="pill" id="stPill" style="color:var(--ok)"></span>
+        <span class="small muted" id="stMeta"></span>
+        <div class="grow"></div>
+        <button class="btn" type="button" id="loadCfg">載入這次設定</button>
+      </div>
+
+      <div class="tabs" role="tablist" aria-label="副目標" id="subTabs"></div>
+      <div class="stats" id="stats"></div>
+
+      <section class="box">
+        <div class="card-h"><h3>收斂圖</h3><span class="small muted">訓練期 ≥ 40 mm MAE（mm）· convergence.csv</span><div class="grow"></div><span class="small" style="color:var(--warn)" id="stopMsg"></span></div>
+        <div style="padding:8px 16px 14px">
+          <svg id="chart" role="img" aria-label="主目標收斂圖" viewBox="0 0 640 240" style="width:100%;height:auto;display:block"></svg>
+          <div class="chart-legend">
+            <span><i style="width:14px;height:3px;background:var(--accent)"></i>目前最佳</span>
+            <span><i style="width:14px;border-top:2px dashed var(--muted)"></i>該代最低（通過守門）</span>
+            <span>橫軸：代數</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="box" style="min-width:0">
+        <div class="card-h"><h3>results.tsv</h3><span class="small muted" id="tblNote"></span><div class="grow"></div>
+          <label class="row small">代數 <select class="inp" id="genSel" style="width:auto;min-height:28px;padding:2px 6px"></select></label></div>
+        <div class="scroll"><table>
+          <thead><tr><th scope="col">run</th><th scope="col">層</th><th scope="col">單元</th><th scope="col">步長</th><th scope="col">批次</th><th scope="col">α</th><th scope="col">MAE≥40</th><th scope="col">低估</th><th scope="col">高估</th><th scope="col">RMSE</th><th scope="col" class="l">狀態</th></tr></thead>
+          <tbody id="tbody"></tbody>
+        </table></div>
+      </section>
+
+      <section class="box" style="min-width:0">
+        <div class="ftabs" role="tablist" aria-label="輸出檔案" id="ftabs"></div>
+        <pre class="file" id="fileBody"></pre>
+      </section>
+    </main>
+
+    <nav class="right" aria-label="歷代實驗">
+      <h2 class="lbl" style="margin:0 8px">歷代實驗</h2>
+      <input class="inp" type="search" id="histQ" placeholder="搜尋站號…" aria-label="搜尋實驗">
+      <div id="hist" style="display:flex;flex-direction:column;gap:4px"></div>
+    </nav>
+  </div>
+
+  <footer class="status">
+    <span id="footL">● Hermes 待命</span>
+    <span id="footM"></span>
+    <div class="grow"></div>
+    <span id="footR"></span>
+  </footer>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script src="data/experiments.js"></script>
+<script>
+(function () {
+  'use strict';
+  var EXP = window.EXPERIMENTS || {};
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return String(s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); };
+  var store = {
+    get: function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  };
+
+  var DEFAULT_TPL = [
+    '# Rain Autoresearch：Agent 實驗指引（由 UI 產生）',
+    '',
+    '測站：[[STATION]]　切分：RAIN_SPLIT=[[SPLIT]]',
+    '',
+    '## 0. 必讀',
+    '1. 主目標：[[MAIN_GOAL]]',
+    '2. 副目標（守門）：',
+    '[[SUB_GOALS]]',
+    '3. 只看訓練期；test 只在全部停止後讀一次寫報告。',
+    '4. 子代由 genome.py breed 決定，你不自己挑親代或參數值。',
+    '',
+    '## 3. 分代流程',
+    '- 每種副目標最多 [[MAX_GEN]] 代；連續 [[PATIENCE]] 代主目標沒進步就停止。',
+    '- 第 1 代跑預設值，第 2 代跑四個角落，第 3 代起每代產生 [[CHILDREN]] 個子代。',
+    '- 同一代最多同時訓練 [[PARALLEL]] 個槽位。',
+    '- 每次訓練後 budget_guard.py record，是否停止以程式輸出為準。',
+    '',
+    '（其餘規則沿用 program.md）'
+  ].join('\n');
+  var TOKENS = ['STATION', 'SPLIT', 'MAIN_GOAL', 'SUB_GOALS', 'MAX_GEN', 'PATIENCE', 'CHILDREN', 'PARALLEL'];
+  var SUB_DESC = {
+    under: '`under`：AE ≥ 20 mm 的低估筆數不多於第 1 代',
+    total: '`total`：AE ≥ 20 mm 的高估＋低估筆數不多於第 1 代',
+    rmse: '`rmse`：整體 RMSE 不劣於第 1 代'
+  };
+  var FALLBACK_MODELS = ['anthropic/claude-sonnet-4.5', 'anthropic/claude-opus-4.1', 'openai/gpt-5', 'openai/gpt-5-mini', 'google/gemini-2.5-pro', 'google/gemini-2.5-flash', 'x-ai/grok-4', 'deepseek/deepseek-chat-v3.1', 'qwen/qwen3-coder', 'nousresearch/hermes-4-405b'];
+
+  var S = {
+    station: EXP['467590'] ? '467590' : (Object.keys(EXP)[0] || ''), upload: null, split: '82', mode: 'preset',
+    view: EXP['467590'] ? '467590' : (Object.keys(EXP)[0] || ''), sub: 'under', gen: null, file: 'card',
+    running: false, demoRuns: [], hit: null, fp: ''
+  };
+
+  /* ---------- theme ---------- */
+  function applyTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+    $('themeLabel').textContent = t === 'light' ? '淺色' : '深色';
+  }
+  applyTheme(store.get('ra-theme') || 'dark');
+  $('themeBtn').onclick = function () {
+    var t = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+    applyTheme(t); store.set('ra-theme', t);
+  };
+  var toastT;
+  function toast(msg) { var el = $('toast'); el.textContent = msg; el.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(function () { el.classList.remove('show'); }, 2400); }
+
+  /* ---------- models ---------- */
+  function fillModels(ids, src) {
+    $('modelList').innerHTML = ids.map(function (m) { return '<option value="' + esc(m) + '">'; }).join('');
+    $('modelSrc').textContent = src;
+  }
+  fillModels(FALLBACK_MODELS, '內建清單（' + FALLBACK_MODELS.length + ' 個）');
+  try {
+    fetch('https://openrouter.ai/api/v1/models').then(function (r) { return r.ok ? r.json() : Promise.reject(); }).then(function (j) {
+      var ids = (j.data || []).map(function (m) { return m.id; }).filter(Boolean).sort();
+      if (ids.length) fillModels(ids, '已從 OpenRouter 載入 ' + ids.length + ' 個模型，可輸入搜尋');
+    }).catch(function () { $('modelSrc').textContent += '；無法連到 OpenRouter，先用內建清單'; });
+  } catch (e) {}
+
+  /* ---------- stations / upload ---------- */
+  function stationLabel(id) { var e = EXP[id]; return id + (e && e.name ? ' ' + e.name : ''); }
+  $('stationSel').innerHTML = Object.keys(EXP).map(function (id) { return '<option value="' + id + '">' + esc(stationLabel(id)) + '（已有結果）</option>'; }).join('') + '<option value="466930">466930（新測站，尚未跑過）</option>';
+  $('stationSel').onchange = function () { S.station = this.value; S.upload = null; updateAll(); };
+
+  function setDrop(on) { $('drop').classList.toggle('over', on); }
+  ['dragenter', 'dragover'].forEach(function (ev) { $('drop').addEventListener(ev, function (e) { e.preventDefault(); setDrop(true); }); });
+  ['dragleave', 'drop'].forEach(function (ev) { $('drop').addEventListener(ev, function (e) { e.preventDefault(); setDrop(false); }); });
+  $('drop').addEventListener('drop', function (e) { if (e.dataTransfer.files[0]) readCsv(e.dataTransfer.files[0]); });
+  $('file').onchange = function () { if (this.files[0]) readCsv(this.files[0]); };
+
+  function readCsv(f) {
+    var m = f.name.match(/(\d{6})/);
+    var info = { name: f.name, station: m ? m[1] : '', cols: [], rows: 0, rain40: null, ok: false, err: '' };
+    var rd = new FileReader();
+    rd.onload = function () {
+      var txt = String(rd.result).replace(/^﻿+/, '');
+      var lines = txt.split(/\r?\n/).filter(function (l) { return l.length; });
+      info.cols = (lines[0] || '').split(',').map(function (c) { return c.trim().replace(/^﻿+/, ''); });
+      info.rows = Math.max(0, lines.length - 1);
+      var ti = info.cols.indexOf('觀測時間(hour)'), pi = info.cols.indexOf('降水量(mm)');
+      if (ti >= 0 && pi >= 0) {
+        var n = 0;
+        for (var i = 1; i < lines.length; i++) { var v = parseFloat(lines[i].split(',')[pi]); if (v >= Number($('thr').value || 40)) n++; }
+        info.rain40 = n; info.ok = true;
+      } else info.err = '找不到「觀測時間(hour)」或「降水量(mm)」欄位';
+      S.upload = info;
+      if (info.station) { S.station = info.station; var opt = $('stationSel').querySelector('option[value="' + info.station + '"]'); if (opt) $('stationSel').value = info.station; }
+      updateAll();
+    };
+    rd.onerror = function () { info.err = '讀不到檔案'; S.upload = info; updateAll(); };
+    rd.readAsText(f, 'utf-8');
+  }
+
+  document.querySelectorAll('[data-split]').forEach(function (b) {
+    b.onclick = function () { S.split = b.dataset.split; document.querySelectorAll('[data-split]').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); updateAll(); };
+  });
+  document.querySelectorAll('[data-mode]').forEach(function (b) {
+    b.onclick = function () {
+      S.mode = b.dataset.mode;
+      document.querySelectorAll('[data-mode]').forEach(function (x) { x.setAttribute('aria-pressed', x === b); });
+      $('subPreset').style.display = S.mode === 'preset' ? 'flex' : 'none';
+      $('subText').hidden = S.mode !== 'semantic';
+      updateAll();
+    };
+  });
+
+  var savedTpl = store.get('ra-tpl');
+  $('tpl').value = savedTpl || DEFAULT_TPL;
+  $('resetTpl').onclick = function () { $('tpl').value = DEFAULT_TPL; store.set('ra-tpl', DEFAULT_TPL); updateAll(); };
+  ['tpl', 'thr', 'metric', 'maxGen', 'patience', 'children', 'parallel', 'subText', 'model', 'apiKey'].forEach(function (id) {
+    $(id).addEventListener('input', function () { if (id === 'tpl') store.set('ra-tpl', $('tpl').value); updateAll(); });
+  });
+  document.querySelectorAll('#subPreset input').forEach(function (c) { c.onchange = updateAll; });
+
+  /* ---------- form → config ---------- */
+  function cfg() {
+    var metric = $('metric').value, thr = Number($('thr').value) || 40;
+    var subs = Array.prototype.filter.call(document.querySelectorAll('#subPreset input'), function (c) { return c.checked; }).map(function (c) { return c.value; });
+    return {
+      station: S.station, split: S.split, metric: metric, threshold: thr,
+      subMode: S.mode, subgoals: S.mode === 'preset' ? subs : [], subText: S.mode === 'semantic' ? $('subText').value.trim() : '',
+      maxGen: Number($('maxGen').value), patience: Number($('patience').value), children: Number($('children').value),
+      template: $('tpl').value
+    };
+  }
+  function goalKey(c) { return (c.metric === 'under' ? 'count_under' : c.metric) + '_ge' + c.threshold + 'mm'; }
+  function goalDesc(c) {
+    var m = { mae: 'MAE，越低越好', rmse: 'RMSE，越低越好', under: '低估筆數，越少越好' }[c.metric];
+    return '訓練期實際雨量 ≥ ' + c.threshold + ' mm 時段的 ' + m;
+  }
+  function subText(c) {
+    if (c.subMode === 'preset') return c.subgoals.length ? c.subgoals.map(function (s) { return '   - ' + SUB_DESC[s] + '（各跑一次完整搜尋）'; }).join('\n') : '   - （未勾選）';
+    if (c.subMode === 'semantic') return '   - 使用者描述：「' + (c.subText || '（尚未填寫）') + '」\n   - 請把這段描述轉成可由程式檢查的守門條件，先回報再開始。';
+    return '   - 不設守門，只依主目標搜尋。';
+  }
+  function render(c) {
+    var map = { STATION: c.station, SPLIT: c.split, MAIN_GOAL: '`' + goalKey(c) + '` = ' + goalDesc(c), SUB_GOALS: subText(c), MAX_GEN: c.maxGen, PATIENCE: c.patience, CHILDREN: c.children, PARALLEL: $('parallel').value };
+    return c.template.replace(/\[\[([A-Z_]+)\]\]/g, function (all, k) { return k in map ? String(map[k]) : all; });
+  }
+  function canon(c) {
+    return JSON.stringify({ station: c.station, split: c.split, metric: c.metric, threshold: c.threshold, subMode: c.subMode, subgoals: c.subgoals.slice().sort(), subText: c.subText, maxGen: c.maxGen, patience: c.patience, children: c.children, template: c.template.replace(/\r/g, '') });
+  }
+  function sha256(str) {
+    if (!(window.crypto && crypto.subtle)) { var h = 0; for (var i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0; return Promise.resolve(('00000000' + (h >>> 0).toString(16)).slice(-8)); }
+    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(str)).then(function (b) { return Array.prototype.map.call(new Uint8Array(b), function (x) { return ('0' + x.toString(16)).slice(-2); }).join(''); });
+  }
+  // the configuration each cached experiment was actually run with
+  var CACHE = {};
+  function buildCache() {
+    return Promise.all(Object.keys(EXP).map(function (id) {
+      var c = { station: id, split: EXP[id].split, metric: 'mae', threshold: 40, subMode: 'preset', subgoals: ['under', 'total', 'rmse'], subText: '', maxGen: 20, patience: 3, children: 8, template: DEFAULT_TPL };
+      return sha256(canon(c)).then(function (h) { CACHE[h] = id; });
+    }));
+  }
+
+  /* ---------- left panel updates ---------- */
+  function updateAll() {
+    var c = cfg();
+    $('goalKey').textContent = goalKey(c);
+    $('goalDesc').textContent = goalDesc(c);
+    var present = TOKENS.filter(function (t) { return c.template.indexOf('[[' + t + ']]') >= 0; });
+    $('tokList').innerHTML = TOKENS.map(function (t) { return '<span class="tokbg" style="opacity:' + (present.indexOf(t) >= 0 ? 1 : .4) + '">' + t + '</span>'; }).join(' ');
+
+    var up = S.upload, st = S.station, exp = EXP[st];
+    $('fileName').textContent = up ? up.name : st + '.csv';
+    $('fileRows').textContent = up ? (up.rows.toLocaleString() + ' 小時') : (exp ? '範例測站' : '尚未上傳');
+    $('fileOk').textContent = up ? (up.ok ? '✓' : '✕') : (exp ? '✓' : '·');
+    $('fileOk').style.color = up ? (up.ok ? 'var(--ok)' : 'var(--err)') : 'var(--muted)';
+
+    var checks = [];
+    if (up) {
+      checks.push(up.ok ? ['✓', 'ok', 'CSV 含 觀測時間(hour)、降水量(mm) 等 ' + up.cols.length + ' 欄'] : ['✕', 'err', up.err]);
+      if (!up.station) checks.push(['✕', 'err', '檔名裡找不到 6 碼站號']);
+      if (up.ok) checks.push(up.rain40 > 0 ? ['✓', 'ok', '降水量 ≥ ' + c.threshold + ' mm 的時數 ' + up.rain40 + ' 筆，可算主目標'] : ['✕', 'err', '沒有 ≥ ' + c.threshold + ' mm 的時段，主目標算不出來']);
+    } else if (exp) {
+      checks.push(['✓', 'ok', '使用已上傳過的 data/' + st + '.csv']);
+    } else checks.push(['!', 'warn', '請上傳 data/' + st + '.csv']);
+    var missing = ['MAIN_GOAL', 'SUB_GOALS'].filter(function (t) { return present.indexOf(t) < 0; });
+    checks.push(missing.length ? ['✕', 'err', '技能模板缺少 ' + missing.map(function (t) { return '[[' + t + ']]'; }).join('、')] : ['✓', 'ok', '技能模板 ' + present.length + ' 個 [[欄位]] 都會被填入']);
+    if (c.subMode === 'preset' && !c.subgoals.length) checks.push(['✕', 'err', '至少勾一種副目標']);
+    if (c.subMode === 'semantic' && !c.subText) checks.push(['!', 'warn', '語意描述還是空的']);
+    var key = $('apiKey').value.trim();
+    checks.push(!key ? ['!', 'warn', '尚未填 OpenRouter Key（原型可略過）'] : /^sk-or-(v1-)?[A-Za-z0-9]{16,}$/.test(key) ? ['✓', 'ok', 'OpenRouter Key 格式正確'] : ['✕', 'err', 'Key 格式應為 sk-or-v1-…']);
+    if (!(c.maxGen >= 2 && c.patience >= 1 && c.children >= 2)) checks.push(['✕', 'err', '演化參數要是正整數（代數 ≥ 2）']);
+    S.blocked = checks.some(function (x) { return x[1] === 'err'; });
+    $('checks').innerHTML = checks.map(function (x) { return '<div><b style="color:var(--' + x[1] + ')">' + x[0] + '</b><span>' + esc(x[2]) + '</span></div>'; }).join('');
+
+    var skill = render(c);
+    S.skill = skill;
+    var name = 'rain-autoresearch-' + st;
+    $('cmd').innerHTML =
+      '<span class="m"># 1. 把組合後的技能放進 Hermes 的技能目錄</span>\n' +
+      '<span class="p">$</span> mkdir -p ~/.hermes/skills/' + esc(name) + '\n' +
+      '<span class="p">$</span> mv SKILL.md ~/.hermes/skills/' + esc(name) + '/\n' +
+      '<span class="m"># 2. 帶著技能和模型啟動代理</span>\n' +
+      '<span class="p">$</span> <span class="c">hermes</span> chat \\\n' +
+      '    <span class="k">--provider</span> <span class="s">openrouter</span> \\\n' +
+      '    <span class="k">-m</span> <span class="s">' + esc($('model').value || 'anthropic/claude-sonnet-4.5') + '</span> \\\n' +
+      '    <span class="k">-s</span> <span class="s">' + esc(name) + '</span> <span class="k">--yolo</span> \\\n' +
+      '    <span class="k">-q</span> <span class="s">"依技能 ' + esc(name) + ' 執行副目標消融實驗"</span>';
+    if (S.file === 'skill') showFile();
+
+    var my = ++updateAll.seq;
+    sha256(canon(c)).then(function (h) {
+      if (my !== updateAll.seq) return;
+      S.fp = h; S.hit = CACHE[h] || null;
+      var card = $('cacheCard');
+      card.classList.toggle('miss', !S.hit);
+      $('cacheHead').textContent = S.hit ? 'CACHE HIT' : 'CACHE MISS';
+      $('cacheMsg').innerHTML = S.hit
+        ? '這組設定（測站、主目標、副目標、演化參數、技能模板）和 <b class="mono">' + esc(stationLabel(S.hit)) + '</b> 那次完全相同，不必重新訓練，按下就直接展示結果。'
+        : '沒有找到設定完全相同的實驗，按下會開始新的最佳化。';
+      $('cacheHash').textContent = 'config sha256 ' + h.slice(0, 4) + '…' + h.slice(-4);
+      $('startLabel').textContent = S.running ? '停止展示' : S.hit ? '直接展示快取結果' : '開始最佳化 Optimize';
+    });
+  }
+  updateAll.seq = 0;
+
+  $('copyCmd').onclick = function () {
+    var t = $('cmd').textContent;
+    (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function () { toast('已複製指令'); }, function () { toast('瀏覽器不允許複製，請手動選取'); });
+  };
+  $('dlSkill').onclick = function () {
+    var md = '---\nname: rain-autoresearch-' + S.station + '\ndescription: 依 UI 設定在測站 ' + S.station + ' 執行 LSTM 副目標消融實驗\n---\n\n' + S.skill + '\n';
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }));
+    a.download = 'SKILL.md'; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+  };
+
+  /* ---------- start / demo run ---------- */
+  var timer = null;
+  $('startBtn').onclick = function () {
+    if (S.running) { stopDemo('已停止展示'); return; }
+    if (S.blocked) { toast('格式檢查還有紅色項目，先修正再開始'); return; }
+    if (S.hit) { S.view = S.hit; S.sub = 'under'; S.gen = null; renderMain(); renderHist(); toast('命中快取：直接展示 ' + stationLabel(S.hit) + ' 的結果'); return; }
+    startDemo();
+  };
+  function startDemo() {
+    var c = cfg(), id = 'demo-' + (S.demoRuns.length + 1);
+    var run = { id: id, station: c.station, gen: 1, slot: 0, slots: 1, t0: Date.now(), sub: c.subgoals[0] || c.subMode, log: [] };
+    S.demoRuns.unshift(run); S.running = run;
+    $('runCard').hidden = false;
+    $('footL').textContent = '● Hermes 執行中 · ' + c.station;
+    log(run, '讀取技能 rain-autoresearch-' + c.station);
+    log(run, 'budget_guard.py status --subgoal ' + run.sub + ' → 從第 1 代開始');
+    tick(); timer = setInterval(tick, 1100);
+    renderHist(); updateAll();
+  }
+  function log(run, msg) {
+    var d = new Date(); var p = function (n) { return ('0' + n).slice(-2); };
+    run.log.push('[' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()) + '] ' + msg);
+    if (S.file === 'log') showFile();
+  }
+  function tick() {
+    var r = S.running; if (!r) return;
+    var c = cfg();
+    r.slots = r.gen === 1 ? 1 : r.gen === 2 ? 4 : c.children;
+    r.slot++;
+    if (r.slot > r.slots) {
+      log(r, '第 ' + r.gen + ' 代 ' + r.slots + ' 組都已 record');
+      r.gen++; r.slot = 1; r.slots = r.gen === 2 ? 4 : c.children;
+      if (r.gen === 3 || r.gen > 3) log(r, 'genome.py breed --generation ' + r.gen + ' → ' + r.slots + ' 個子代');
+      if (r.gen > Math.min(c.maxGen, 6)) { stopDemo('展示結束：實際訓練請在本機執行指令'); return; }
+    }
+    log(r, 'g' + ('0' + r.gen).slice(-2) + '_c' + r.slot + ' 開始訓練');
+    var sec = Math.floor((Date.now() - r.t0) / 1000) * 97;
+    var p = function (n) { return ('0' + n).slice(-2); };
+    $('runClock').textContent = p(Math.floor(sec / 3600)) + ':' + p(Math.floor(sec / 60) % 60) + ':' + p(sec % 60);
+    $('runWhat').textContent = r.station + ' · subgoal_' + r.sub + ' · 第 ' + r.gen + ' 代 · 槽位 ' + r.slot + ' / ' + r.slots + ' 訓練中';
+    var html = ''; for (var i = 1; i <= r.slots; i++) html += '<span class="' + (i < r.slot ? 'done' : i === r.slot ? 'now' : '') + '"></span>';
+    $('slots').innerHTML = html;
+    renderHist();
+  }
+  function stopDemo(msg) {
+    clearInterval(timer); timer = null;
+    if (S.running) { log(S.running, msg); S.running.done = true; }
+    S.running = false; $('runCard').hidden = true;
+    $('footL').textContent = '● Hermes 待命';
+    toast(msg); renderHist(); updateAll();
+  }
+
+  /* ---------- main panel ---------- */
+  var fmt = function (v, d) { return v == null ? 'NA' : Number(v).toFixed(d); };
+  var int = function (v) { return v == null ? 'NA' : String(Math.round(v)); };
+  function abl(e, sub) { return (e.ablation || []).filter(function (a) { return a.subgoal === sub; })[0] || {}; }
+
+  function renderMain() {
+    var e = EXP[S.view];
+    if (!e) return;
+    var sg = e.subgoals[S.sub], a = abl(e, S.sub), g1 = abl(e, 'generation1'), ctl = abl(e, 'control');
+    $('stId').textContent = e.id; $('stName').textContent = e.name || '';
+    $('stPill').textContent = '三種副目標皆已停止';
+    $('stMeta').textContent = 'RAIN_SPLIT ' + e.split + ' · 訓練期 2009–2022 · 快取結果';
+    $('subTabs').innerHTML = ['under', 'total', 'rmse'].map(function (s) { return '<button type="button" role="tab" data-sub="' + s + '" aria-selected="' + (s === S.sub) + '">subgoal_' + s + '</button>'; }).join('');
+    $('subTabs').querySelectorAll('button').forEach(function (b) { b.onclick = function () { S.sub = b.dataset.sub; S.gen = null; renderMain(); }; });
+
+    var bestRun = a.best_run || '';
+    var beat = bestRun && bestRun !== 'g01_c1';
+    $('stats').innerHTML = [
+      ['best ≥40 mm MAE', fmt(a.mae_ge40mm, 2), bestRun + (beat ? '' : '（未勝過第 1 代）')],
+      ['第 1 代 / 純 MAE 對照', fmt(g1.mae_ge40mm, 2), '對照組 control_mae ' + fmt(ctl.mae_ge40mm, 2)],
+      ['代數 · 訓練次數', (a.generations || '–') + ' · ' + (a.runs || '–'), '其中實際訓練 ' + (a.trained_runs || '–') + ' 次，其餘沿用快取'],
+      ['守門擋下', a.guard_fail_runs || '0', 'guard_fail，不能當 best']
+    ].map(function (s) { return '<div class="stat"><span class="small muted">' + esc(s[0]) + '</span><span class="v">' + esc(s[1]) + '</span><span class="s">' + esc(s[2]) + '</span></div>'; }).join('');
+    $('stopMsg').textContent = a.message ? a.message.replace('STOP: 3 consecutive generations without primary-objective progress', 'STOP：連續 3 代主目標沒進步') : '';
+
+    drawChart(sg.conv);
+
+    var gens = []; sg.rows.forEach(function (r) { if (gens.indexOf(r.g) < 0) gens.push(r.g); });
+    var bm = bestRun.match(/g(\d+)_c/); var bestGen = bm ? Number(bm[1]) : 1;
+    if (S.gen == null) S.gen = bestGen === 1 ? 2 : bestGen;
+    $('genSel').innerHTML = '<option value="all">全部</option>' + gens.map(function (g) { return '<option value="' + g + '"' + (g === S.gen ? ' selected' : '') + '>第 ' + g + ' 代' + (g === bestGen ? '（best）' : '') + '</option>'; }).join('');
+    if (S.gen === 'all') $('genSel').value = 'all';
+    $('genSel').onchange = function () { S.gen = this.value === 'all' ? 'all' : Number(this.value); renderMain(); };
+    var rows = sg.rows.filter(function (r) { return S.gen === 'all' || r.g === S.gen; });
+    $('tblNote').textContent = (S.gen === 'all' ? '全部 ' + rows.length + ' 次訓練' : '第 ' + S.gen + ' 代 · ' + rows.length + ' 組') + (bestGen === 1 ? ' · 這個副目標的 best 仍是第 1 代' : '');
+    $('tbody').innerHTML = rows.map(function (r) {
+      var run = 'g' + ('0' + r.g).slice(-2) + '_c' + r.c;
+      var isBest = run === bestRun;
+      var st = isBest ? '★ best' : r.cache ? '快取 ' + r.cache.replace(/^subgoal_/, '') : r.status;
+      var cls = isBest ? 'st-best' : r.cache ? 'muted' : 'st-' + r.status;
+      return '<tr class="' + (isBest ? 'best' : '') + '"><td>' + run + '</td><td>' + r.L + '</td><td>' + r.U + '</td><td>' + r.TS + '</td><td>' + r.B + '</td><td>' + (r.a === 'NA' ? '陳柏孚' : r.a) + '</td><td style="font-weight:600">' + fmt(r.mae, 2) + '</td><td>' + int(r.under) + '</td><td>' + int(r.over) + '</td><td>' + fmt(r.rmse, 3) + '</td><td class="l ' + cls + '">' + esc(st) + '</td></tr>';
+    }).join('');
+
+    $('footR').textContent = e.id + ' · subgoal_' + S.sub;
+    renderFileTabs();
+  }
+
+  function drawChart(conv) {
+    var pts = conv.filter(function (c) { return c.pass != null || c.best != null; });
+    var vals = []; pts.forEach(function (c) { if (c.pass != null) vals.push(c.pass); vals.push(c.best); });
+    var lo = Math.floor(Math.min.apply(null, vals) / 2) * 2 - 2, hi = Math.ceil(Math.max.apply(null, vals) / 2) * 2 + 2;
+    var step = (hi - lo) > 24 ? 8 : 4;
+    lo = Math.floor(lo / step) * step; hi = Math.ceil(hi / step) * step;
+    var X0 = 50, X1 = 625, Y0 = 200, Y1 = 16, n = Math.max(2, pts.length);
+    var x = function (g) { return X0 + (g - pts[0].g) * (X1 - X0) / (n - 1); };
+    var y = function (v) { return Y0 - (v - lo) * (Y0 - Y1) / (hi - lo); };
+    var svg = '';
+    for (var v = lo; v <= hi; v += step) svg += '<line x1="' + X0 + '" x2="' + X1 + '" y1="' + y(v) + '" y2="' + y(v) + '" stroke="var(--border)" stroke-dasharray="3 4"/><text x="' + (X0 - 10) + '" y="' + (y(v) + 4) + '" text-anchor="end" fill="var(--muted)" font-size="11" font-family="var(--mono)">' + v + '</text>';
+    pts.forEach(function (c) { svg += '<text x="' + x(c.g) + '" y="' + (Y0 + 22) + '" text-anchor="middle" fill="var(--muted)" font-size="11" font-family="var(--mono)">' + c.g + '</text>'; });
+    var pass = pts.filter(function (c) { return c.pass != null; });
+    svg += '<polyline fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="5 4" points="' + pass.map(function (c) { return x(c.g) + ',' + y(c.pass); }).join(' ') + '"/>';
+    pass.forEach(function (c) { svg += '<circle cx="' + x(c.g) + '" cy="' + y(c.pass) + '" r="3" fill="var(--muted)"><title>第 ' + c.g + ' 代最低 ' + c.pass.toFixed(3) + ' mm</title></circle>'; });
+    var d = 'M' + x(pts[0].g) + ' ' + y(pts[0].best);
+    for (var i = 1; i < pts.length; i++) d += ' H' + x(pts[i].g) + ' V' + y(pts[i].best);
+    svg += '<path d="' + d + '" fill="none" stroke="var(--accent)" stroke-width="2.5"/>';
+    var last = pts[pts.length - 1];
+    svg += '<text x="' + (X1) + '" y="' + (y(last.best) - 14) + '" text-anchor="end" fill="var(--accent)" font-size="12" font-family="var(--mono)">' + last.best.toFixed(2) + '</text>';
+    $('chart').innerHTML = svg;
+  }
+
+  var FILES = [['card', 'station_card.md'], ['learn', 'learnings.md'], ['abl', 'ablation.tsv'], ['skill', '組合後 SKILL.md'], ['log', 'hermes.log']];
+  function renderFileTabs() {
+    $('ftabs').innerHTML = FILES.map(function (f) { return '<button type="button" role="tab" data-f="' + f[0] + '" aria-selected="' + (f[0] === S.file) + '">' + esc(f[1]) + '</button>'; }).join('');
+    $('ftabs').querySelectorAll('button').forEach(function (b) { b.onclick = function () { S.file = b.dataset.f; renderFileTabs(); }; });
+    showFile();
+  }
+  function showFile() {
+    var e = EXP[S.view] || {}, body = '';
+    if (S.file === 'card') body = e.card;
+    else if (S.file === 'learn') body = e.learnings;
+    else if (S.file === 'abl') body = alignTsv(e.ablationText || '');
+    else if (S.file === 'skill') body = S.skill || '';
+    else {
+      var r = S.running || S.demoRuns[0];
+      body = r ? r.log.join('\n') : '（這裡會即時顯示 Hermes 的輸出。按「開始最佳化」可看展示模式的模擬紀錄。）';
+    }
+    $('fileBody').textContent = body || '';
+  }
+  function alignTsv(t) {
+    var keep = ['subgoal', 'decision', 'runs', 'trained_runs', 'guard_fail_runs', 'generations', 'best_run', 'mae_ge40mm', 'count_under_ge20', 'count_over_ge20', 'overall_rmse'];
+    var lines = t.trim().split('\n').map(function (l) { return l.split('\t'); });
+    var head = lines[0], idx = keep.map(function (k) { return head.indexOf(k); }).filter(function (i) { return i >= 0; });
+    var rows = lines.map(function (l) { return idx.map(function (i) { var v = l[i] || ''; return /^\d+\.\d{4,}$/.test(v) ? Number(v).toFixed(3) : v; }); });
+    var w = idx.map(function (_, j) { return Math.max.apply(null, rows.map(function (r) { return r[j].length; })); });
+    return rows.map(function (r) { return r.map(function (v, j) { return (v + '                    ').slice(0, w[j] + 2); }).join(''); }).join('\n');
+  }
+
+  /* ---------- history ---------- */
+  function renderHist() {
+    var q = $('histQ').value.trim();
+    var items = [];
+    S.demoRuns.forEach(function (r) { items.push({ id: r.id, name: r.station, status: r.done ? '展示結束' : '執行中', color: r.done ? 'var(--muted)' : 'var(--accent)', detail: 'subgoal_' + r.sub + ' · 第 ' + r.gen + ' 代', demo: true }); });
+    Object.keys(EXP).forEach(function (id) {
+      var e = EXP[id], a = abl(e, 'under');
+      items.push({ id: id, name: e.name, status: '完成', color: 'var(--ok)', detail: 'best ' + fmt(a.mae_ge40mm, 2) + ' mm（under）· 可重用快取' });
+    });
+    items = items.filter(function (it) { return !q || (it.id + ' ' + (it.name || '')).indexOf(q) >= 0; });
+    $('hist').innerHTML = items.map(function (it) {
+      return '<button type="button" class="hist" data-id="' + it.id + '" aria-current="' + (!it.demo && it.id === S.view) + '">' +
+        '<span class="row" style="width:100%"><span class="dot" style="background:' + it.color + (it.status === '執行中' ? ';animation:pulse 1.2s infinite' : '') + '"></span>' +
+        '<span class="mono" style="font-size:13px">' + esc(it.id) + '</span><span class="small">' + esc(it.name || '') + '</span><span class="grow"></span>' +
+        '<span style="font-size:11px;color:' + it.color + '">' + esc(it.status) + '</span></span>' +
+        '<span class="small muted">' + esc(it.detail) + '</span></button>';
+    }).join('') || '<span class="small muted" style="padding:0 8px">沒有符合的實驗</span>';
+    $('hist').querySelectorAll('.hist').forEach(function (b) {
+      b.onclick = function () {
+        if (EXP[b.dataset.id]) { S.view = b.dataset.id; S.gen = null; renderMain(); renderHist(); }
+        else { S.file = 'log'; renderFileTabs(); }
+      };
+    });
+  }
+  $('histQ').addEventListener('input', renderHist);
+
+  $('loadCfg').onclick = function () {
+    S.station = S.view; S.upload = null; $('stationSel').value = S.view;
+    $('metric').value = 'mae'; $('thr').value = 40; $('maxGen').value = 20; $('patience').value = 3; $('children').value = 8;
+    document.querySelector('[data-mode="preset"]').click();
+    document.querySelectorAll('#subPreset input').forEach(function (c) { c.checked = true; });
+    $('tpl').value = DEFAULT_TPL; store.set('ra-tpl', DEFAULT_TPL);
+    document.querySelector('[data-split="' + EXP[S.view].split + '"]').click();
+    updateAll(); toast('已把 ' + stationLabel(S.view) + ' 的設定載入左側');
+  };
+
+  $('footM').textContent = 'OpenRouter · Hermes Agent';
+  buildCache().then(function () { $('stationSel').value = S.station; updateAll(); renderMain(); renderHist(); });
+})();
+</script>
+</body>
+</html>
