@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 <style>
 :root{
   --bg:#0B0E13;--bar:#0F131A;--panel:#0D1117;--side:#090C10;--editor:#0B0E13;--term:#06080B;
@@ -29,6 +30,21 @@
 [hidden]{display:none!important}
 html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
 a{color:var(--accent)}
+details.pv summary{display:flex;align-items:center;gap:6px;cursor:pointer;list-style:none}
+details.pv summary::-webkit-details-marker{display:none}
+details.pv summary::before{content:'▸';color:var(--accent);font-size:12px;transition:transform .15s}
+details.pv[open] summary::before{transform:rotate(90deg)}
+details.pv{display:block}
+details.pv>*+*{margin-top:10px}
+.startbar{position:sticky;bottom:0;z-index:5;display:flex;flex-direction:column;gap:8px;margin:0 -20px -20px;padding:12px 20px 16px;background:var(--panel);border-top:1px solid var(--border)}
+/* 預測圖是白底 matplotlib：深色模式反相再轉回色相，藍紅線維持原色系、底色貼近頁面 */
+img.plot{filter:invert(.9) hue-rotate(180deg) brightness(1.05) contrast(.92) saturate(1.3)}
+:root[data-theme="light"] img.plot{filter:none}
+.ferr{font-size:12px;color:var(--err)}
+.ferr.warn{color:var(--warn)}
+.inp.bad{border-color:var(--err)}
+a.gh{display:flex;align-items:center;color:var(--muted);font-size:20px;text-decoration:none}
+a.gh:hover{color:var(--text)}
 button,input,select,textarea{font:inherit;color:inherit}
 code,.mono{font-family:var(--mono)}
 .app{min-height:100vh;display:flex;flex-direction:column}
@@ -65,13 +81,6 @@ textarea.inp{resize:vertical;line-height:1.5}
 .tokbg{font-family:var(--mono);color:var(--token);background:var(--token-bg);border-radius:2px;padding:0 2px}
 .chk{display:flex;gap:8px;align-items:flex-start;padding:6px 8px;border-radius:3px;border:1px solid var(--border);background:var(--input);font-size:13px;cursor:pointer}
 .box{border:1px solid var(--border);border-radius:4px;background:var(--panel)}
-.checks{display:flex;flex-direction:column;gap:4px;padding:10px 12px;border-radius:4px;border:1px solid var(--border);background:var(--editor);font-size:12px}
-.checks div{display:flex;gap:8px;align-items:baseline}
-.checks b{flex:0 0 14px}
-.cache{display:flex;flex-direction:column;gap:8px;padding:10px 12px;border-radius:4px;border:1px dashed var(--token);background:var(--token-bg);font-size:12px;line-height:1.5}
-.cache .head{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-weight:600;letter-spacing:2px;color:var(--accent)}
-.cache.miss{border-color:var(--border-strong);background:transparent}
-.cache.miss .head{color:var(--muted)}
 .term{padding:10px 12px;border-radius:4px;background:var(--term);border:1px solid var(--border);font-family:var(--mono);font-size:12px;line-height:19px;white-space:pre;overflow-x:auto}
 .term .p{color:var(--ok)}.term .c{color:var(--fn)}.term .k{color:var(--key)}.term .s{color:var(--str)}.term .m{color:var(--muted)}
 .runcard{display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:4px;border:1px solid var(--accent);background:var(--sel)}
@@ -87,7 +96,7 @@ textarea.inp{resize:vertical;line-height:1.5}
 .tabs{display:flex;flex-wrap:wrap;border-bottom:1px solid var(--border)}
 .tabs button{min-height:36px;padding:0 16px;border:0;background:transparent;cursor:pointer;font-family:var(--mono);font-size:12px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
 .tabs button[aria-selected="true"]{color:var(--text);border-bottom-color:var(--accent);font-weight:600}
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:12px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(140px,100%),1fr));gap:12px}
 .stat{padding:12px 14px;border-radius:4px;border:1px solid var(--border);background:var(--panel);display:flex;flex-direction:column;gap:4px;min-width:0}
 .stat .v{font-size:22px;font-weight:600;font-family:var(--mono)}
 .stat .s{font-size:11px;color:var(--muted)}
@@ -119,16 +128,49 @@ footer.status{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4p
 .chart-legend span{display:flex;align-items:center;gap:6px}
 .chart-legend i{display:inline-block}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+/* 寬螢幕整體放大 125%（等同 Chrome 縮放 125%） */
+@media (min-width:861px){body{zoom:1.25}.app{min-height:calc(100vh / 1.25)}}
+/* Markdown */
+.md{padding:14px 20px;min-height:220px;max-height:640px;overflow:auto;background:var(--editor);font-size:13px;line-height:1.7}
+.md h1{font-size:18px;margin:4px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+.md h2{font-size:15px;margin:18px 0 8px}
+.md h3{font-size:14px;margin:14px 0 6px}
+.md p,.md ul,.md ol{margin:0 0 10px}
+.md ul,.md ol{padding-left:22px}
+.md blockquote{margin:0 0 10px;padding:6px 12px;border-left:3px solid var(--accent);background:var(--panel);color:var(--muted)}
+.md code{padding:1px 4px;border-radius:3px;background:var(--input);font-size:12px}
+.md pre{padding:10px 12px;border-radius:4px;background:var(--term);border:1px solid var(--border);overflow-x:auto}
+.md pre code{padding:0;background:none}
+.md table{width:auto;margin:0 0 12px}
+/* Gradio 風格表格 */
+.df{border:1px solid var(--border);border-radius:6px;overflow:auto;max-height:520px}
+.df table,.md table{border-collapse:separate;border-spacing:0;font-family:var(--mono);font-size:12px}
+.df th,.md th{position:sticky;top:0;z-index:1;background:var(--bar);color:var(--text);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--border-strong)}
+.df td,.md td{padding:6px 10px;border-bottom:1px solid var(--border)}
+.md th,.md td{text-align:left;white-space:nowrap}
+.df tbody tr{border-top:0}
+.df th:first-child,.df td:first-child{padding-left:12px}
+.df th+th,.df td+td,.md th+th,.md td+td{border-left:1px solid var(--border)}
+.df tbody tr:nth-child(even),.md tbody tr:nth-child(even){background:var(--panel)}
+.df tbody tr:hover{background:var(--sel)}
+.df tbody tr:last-child td{border-bottom:0}
+.md table{border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.md tbody tr:last-child td{border-bottom:0}
+.df th.sortable{cursor:pointer;user-select:none}
+.df th.sortable:hover{color:var(--accent)}
+.df th .arr{margin-left:4px;color:var(--accent)}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
 </head>
 <body>
 <div class="app">
   <header class="top">
     <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 15a4 4 0 0 1-.5-8A6 6 0 0 1 18 8a3.5 3.5 0 0 1 0 7"/><path d="M9 18l-1 3"/><path d="M13 18l-1 3"/><path d="M17 18l-1 3"/></svg>
     <h1>Rain Autoresearch</h1>
-    <span class="muted small">測站降雨模型 · LSTM 自動調參 · 互動原型</span>
+    <span class="muted small">測站降雨模型自動調參互動原型</span>
     <div class="grow"></div>
-    <a class="small" href="https://github.com/x200706/rain-autoresearch-ui" id="repoLink">GitHub</a>
+    <a class="gh" href="https://github.com/x200706/rain-autoresearch-ui" id="repoLink" aria-label="GitHub 原始碼" title="GitHub"><i class="fa-brands fa-github"></i></a>
     <button class="btn row" id="themeBtn" type="button" aria-label="切換深淺色">
       <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
       <span id="themeLabel">深色</span>
@@ -143,7 +185,7 @@ footer.status{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4p
           <div class="row">
             <input class="inp mono" id="apiKey" type="password" placeholder="sk-or-v1-…" autocomplete="off" style="font-size:12px">
           </div>
-          <span class="small muted">原型只在你的瀏覽器裡檢查格式，不會送出。</span>
+          <span class="ferr" id="errKey" hidden></span>
         </label>
         <label class="f">代理模型
           <input class="inp" id="model" list="modelList" value="anthropic/claude-sonnet-4.5">
@@ -157,13 +199,13 @@ footer.status{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4p
         <label class="drop" id="drop">
           <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 20h16"/></svg>
           <span style="font-size:13px">拖曳測站 CSV，或<u style="color:var(--accent)">選擇檔案</u></span>
-          <span class="small muted">逐時觀測 · 檔名即站號（例：467590.csv）</span>
           <input type="file" id="file" accept=".csv" class="sr">
         </label>
         <label class="f">或使用已跑過的測站
           <select class="inp" id="stationSel"></select>
         </label>
         <div class="chip" id="fileChip"><span id="fileOk" style="color:var(--ok)">✓</span><span class="grow" id="fileName"></span><span class="muted" id="fileRows"></span></div>
+        <span class="ferr" id="errFile" hidden></span>
         <div class="row" style="gap:10px;font-size:13px">
           <span>訓練／測試切分</span>
           <div class="seg" role="group" aria-label="RAIN_SPLIT">
@@ -174,17 +216,7 @@ footer.status{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4p
       </section>
 
       <section class="blk">
-        <div class="row" style="align-items:baseline">
-          <h2 class="lbl">3 · 代理技能模板</h2>
-          <div class="grow"></div>
-          <button class="btn small" type="button" id="resetTpl" style="min-height:28px">還原</button>
-        </div>
-        <textarea class="inp mono" id="tpl" rows="14" spellcheck="false" style="font-size:12px;background:var(--editor)"></textarea>
-        <div class="small muted">用 <span class="tok">[[欄位]]</span> 標記可替換處：<span id="tokList"></span></div>
-      </section>
-
-      <section class="blk">
-        <h2 class="lbl">4 · 主目標 <span class="tok">[[MAIN_GOAL]]</span></h2>
+        <h2 class="lbl">3 · 主目標 <span class="tok">[[MAIN_GOAL]]</span></h2>
         <div class="grid2">
           <label class="f" style="font-size:12px">指標
             <select class="inp" id="metric">
@@ -197,50 +229,57 @@ footer.status{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4p
             <input class="inp" id="thr" type="number" min="1" max="200" value="40">
           </label>
         </div>
-        <div class="small muted">→ <code id="goalKey" style="color:var(--key)">mae_ge40mm</code>：<span id="goalDesc"></span></div>
+        <div class="small muted">→ <code id="goalKey" style="color:var(--key)">mae_ge40mm</code></div>
       </section>
 
       <section class="blk">
-        <h2 class="lbl">5 · 副目標（守門） <span class="tok">[[SUB_GOALS]]</span></h2>
+        <h2 class="lbl">4 · 副目標（守門） <span class="tok">[[SUB_GOALS]]</span></h2>
         <div class="seg" role="group" aria-label="副目標寫法" id="subSeg">
           <button type="button" data-mode="preset" aria-pressed="true">預設三種</button>
           <button type="button" data-mode="semantic" aria-pressed="false">語意描述</button>
-          <button type="button" data-mode="free" aria-pressed="false">自由</button>
         </div>
         <div id="subPreset" style="display:flex;flex-direction:column;gap:6px">
           <label class="chk"><input type="checkbox" value="under" checked><span><span class="mono" style="color:var(--key)">under</span><br><span class="small muted">AE ≥ 20 mm 的低估筆數不多於第 1 代</span></span></label>
           <label class="chk"><input type="checkbox" value="total" checked><span><span class="mono" style="color:var(--key)">total</span><br><span class="small muted">AE ≥ 20 mm 的高估＋低估筆數不多於第 1 代</span></span></label>
           <label class="chk"><input type="checkbox" value="rmse" checked><span><span class="mono" style="color:var(--key)">rmse</span><br><span class="small muted">整體 RMSE 不劣於第 1 代</span></span></label>
-          <span class="small muted">勾幾種就各跑一次完整搜尋（消融實驗）</span>
         </div>
         <textarea class="inp" id="subText" rows="4" hidden placeholder="用一句話描述你在意的副作用，例如：大雨時寧可高估也不要低估，整體誤差不能比原本差太多"></textarea>
+        <span class="ferr" id="errSub" hidden></span>
       </section>
 
       <section class="blk">
-        <h2 class="lbl">6 · 演化參數</h2>
+        <h2 class="lbl">5 · 演化參數</h2>
         <div class="grid2">
           <label class="f" style="font-size:12px"><span>最多代數 <span class="tok">[[MAX_GEN]]</span></span><input class="inp" id="maxGen" type="number" min="2" max="50" value="20"></label>
           <label class="f" style="font-size:12px"><span>早停 <span class="tok">[[PATIENCE]]</span></span><input class="inp" id="patience" type="number" min="1" max="10" value="3"></label>
           <label class="f" style="font-size:12px"><span>每代子代 <span class="tok">[[CHILDREN]]</span></span><input class="inp" id="children" type="number" min="2" max="32" value="8"></label>
           <label class="f" style="font-size:12px"><span>同時訓練 <span class="tok">[[PARALLEL]]</span></span><input class="inp" id="parallel" type="number" min="1" max="8" value="3"></label>
         </div>
-        <span class="small muted">固定不調：突變率 1/14、SEED 42、學習率 0.001、Dropout 0.2、凍結的 LightGBM gate</span>
+        <span class="ferr" id="errEvo" hidden></span>
       </section>
 
-      <section class="blk">
-        <h2 class="lbl">7 · 格式檢查</h2>
-        <div class="checks" id="checks" aria-live="polite"></div>
-        <div class="cache" id="cacheCard">
-          <div class="head">
-            <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
-            <span id="cacheHead">CACHE</span>
-          </div>
-          <span id="cacheMsg"></span>
-          <code class="muted" id="cacheHash"></code>
+      <details class="blk pv">
+        <summary><h2 class="lbl">6 · 預覽</h2><span class="ferr" id="errTpl" hidden></span></summary>
+        <div class="row" style="justify-content:flex-end">
+          <button class="btn small" type="button" id="dlSkill" style="min-height:28px">下載 SKILL.md</button>
         </div>
+        <div class="box" style="overflow:hidden">
+          <div class="ftabs" role="tablist" aria-label="預覽">
+            <button type="button" role="tab" data-pv="tpl" aria-selected="true">SKILL.md 模板</button>
+            <button type="button" role="tab" data-pv="cmd" aria-selected="false">Shell 指令</button>
+          </div>
+          <div id="pvTpl" style="display:flex;flex-direction:column;gap:6px;padding:8px;background:var(--editor)">
+            <textarea class="inp mono" id="tpl" rows="14" spellcheck="false" style="font-size:12px;background:var(--editor);border:0;padding:4px"></textarea>
+            <div class="small muted" id="tokList"></div>
+          </div>
+          <div class="term" id="cmd" hidden style="border:0;border-radius:0"></div>
+        </div>
+      </details>
+
+      <div class="startbar">
         <button class="btn primary big" type="button" id="startBtn">
           <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4l13 8-13 8z"/></svg>
-          <span id="startLabel">開始最佳化 Optimize</span>
+          <span id="startLabel">開始訓練</span>
         </button>
         <div class="runcard" id="runCard" hidden>
           <div class="row" style="gap:8px;font-size:13px">
@@ -250,15 +289,9 @@ footer.status{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4p
           <div class="small" id="runWhat"></div>
           <div class="bar"><i></i></div>
           <div class="slots" id="slots"></div>
-          <div class="demo-note">展示模式：靜態網站不會真的訓練，只模擬等待畫面。實際執行請複製下方指令到本機。</div>
+          <div class="demo-note">展示模式，不會真的訓練</div>
         </div>
-        <div style="display:flex;flex-direction:column;gap:6px">
-          <div class="row"><span class="small muted grow">組合後送到終端的 shell 指令</span>
-            <button class="btn small" type="button" id="copyCmd" style="min-height:28px">複製</button>
-            <button class="btn small" type="button" id="dlSkill" style="min-height:28px">下載 SKILL.md</button></div>
-          <div class="term" id="cmd"></div>
-        </div>
-      </section>
+      </div>
     </aside>
 
     <main>
@@ -274,22 +307,27 @@ footer.status{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4p
       <div class="stats" id="stats"></div>
 
       <section class="box">
-        <div class="card-h"><h3>收斂圖</h3><span class="small muted">訓練期 ≥ 40 mm MAE（mm）· convergence.csv</span><div class="grow"></div><span class="small" style="color:var(--warn)" id="stopMsg"></span></div>
+        <div class="card-h"><h3>收斂圖</h3><span class="small muted">訓練期 ≥ 40 mm MAE（mm）</span><div class="grow"></div><span class="small" style="color:var(--warn)" id="stopMsg"></span></div>
         <div style="padding:8px 16px 14px">
           <svg id="chart" role="img" aria-label="主目標收斂圖" viewBox="0 0 640 240" style="width:100%;height:auto;display:block"></svg>
           <div class="chart-legend">
             <span><i style="width:14px;height:3px;background:var(--accent)"></i>目前最佳</span>
             <span><i style="width:14px;border-top:2px dashed var(--muted)"></i>該代最低（通過守門）</span>
-            <span>橫軸：代數</span>
           </div>
         </div>
+      </section>
+
+      <section class="box" style="min-width:0;overflow:hidden" id="plotBox">
+        <div class="card-h"><h3>預測效果</h3><span class="small muted" id="plotNote"></span></div>
+        <div class="ftabs" role="tablist" aria-label="預測圖" id="plotTabs"></div>
+        <a id="plotLink" target="_blank" rel="noopener" style="display:block;background:var(--editor)"><img id="plotImg" class="plot" alt="" style="width:100%;height:auto;display:block"></a>
       </section>
 
       <section class="box" style="min-width:0">
         <div class="card-h"><h3>results.tsv</h3><span class="small muted" id="tblNote"></span><div class="grow"></div>
           <label class="row small">代數 <select class="inp" id="genSel" style="width:auto;min-height:28px;padding:2px 6px"></select></label></div>
-        <div class="scroll"><table>
-          <thead><tr><th scope="col">run</th><th scope="col">層</th><th scope="col">單元</th><th scope="col">步長</th><th scope="col">批次</th><th scope="col">α</th><th scope="col">MAE≥40</th><th scope="col">低估</th><th scope="col">高估</th><th scope="col">RMSE</th><th scope="col" class="l">狀態</th></tr></thead>
+        <div class="df" style="margin:12px"><table>
+          <thead><tr><th scope="col">run</th><th scope="col">層</th><th scope="col">單元</th><th scope="col">步長</th><th scope="col">批次</th><th scope="col">α</th><th scope="col">MAE≥40</th><th scope="col">低估</th><th scope="col">高估</th><th scope="col">整體 MAE</th><th scope="col">整體 RMSE</th><th scope="col" class="l">狀態</th></tr></thead>
           <tbody id="tbody"></tbody>
         </table></div>
       </section>
@@ -297,6 +335,8 @@ footer.status{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4p
       <section class="box" style="min-width:0">
         <div class="ftabs" role="tablist" aria-label="輸出檔案" id="ftabs"></div>
         <pre class="file" id="fileBody"></pre>
+        <div class="md" id="mdBody" hidden></div>
+        <div id="tsvBody" style="padding:12px;background:var(--editor)" hidden></div>
       </section>
     </main>
 
@@ -329,7 +369,7 @@ footer.status{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4p
   };
 
   var DEFAULT_TPL = [
-    '# Rain Autoresearch：Agent 實驗指引（由 UI 產生）',
+    '# Rain Autoresearch：Agent 實驗指引',
     '',
     '測站：[[STATION]]　切分：RAIN_SPLIT=[[SPLIT]]',
     '',
@@ -380,17 +420,17 @@ footer.status{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4p
     $('modelList').innerHTML = ids.map(function (m) { return '<option value="' + esc(m) + '">'; }).join('');
     $('modelSrc').textContent = src;
   }
-  fillModels(FALLBACK_MODELS, '內建清單（' + FALLBACK_MODELS.length + ' 個）');
+  fillModels(FALLBACK_MODELS, FALLBACK_MODELS.length + ' 個模型');
   try {
     fetch('https://openrouter.ai/api/v1/models').then(function (r) { return r.ok ? r.json() : Promise.reject(); }).then(function (j) {
       var ids = (j.data || []).map(function (m) { return m.id; }).filter(Boolean).sort();
-      if (ids.length) fillModels(ids, '已從 OpenRouter 載入 ' + ids.length + ' 個模型，可輸入搜尋');
-    }).catch(function () { $('modelSrc').textContent += '；無法連到 OpenRouter，先用內建清單'; });
+      if (ids.length) fillModels(ids, ids.length + ' 個模型');
+    }).catch(function () {});
   } catch (e) {}
 
   /* ---------- stations / upload ---------- */
   function stationLabel(id) { var e = EXP[id]; return id + (e && e.name ? ' ' + e.name : ''); }
-  $('stationSel').innerHTML = Object.keys(EXP).map(function (id) { return '<option value="' + id + '">' + esc(stationLabel(id)) + '（已有結果）</option>'; }).join('') + '<option value="466930">466930（新測站，尚未跑過）</option>';
+  $('stationSel').innerHTML = Object.keys(EXP).map(function (id) { return '<option value="' + id + '">' + esc(stationLabel(id)) + '</option>'; }).join('') + '<option value="466930">466930</option>';
   $('stationSel').onchange = function () { S.station = this.value; S.upload = null; updateAll(); };
 
   function setDrop(on) { $('drop').classList.toggle('over', on); }
@@ -435,9 +475,8 @@ footer.status{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4p
     };
   });
 
-  var savedTpl = store.get('ra-tpl');
+  var savedTpl = (store.get('ra-tpl') || '').replace('實驗指引（由 UI 產生）', '實驗指引');
   $('tpl').value = savedTpl || DEFAULT_TPL;
-  $('resetTpl').onclick = function () { $('tpl').value = DEFAULT_TPL; store.set('ra-tpl', DEFAULT_TPL); updateAll(); };
   ['tpl', 'thr', 'metric', 'maxGen', 'patience', 'children', 'parallel', 'subText', 'model', 'apiKey'].forEach(function (id) {
     $(id).addEventListener('input', function () { if (id === 'tpl') store.set('ra-tpl', $('tpl').value); updateAll(); });
   });
@@ -461,8 +500,7 @@ footer.status{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4p
   }
   function subText(c) {
     if (c.subMode === 'preset') return c.subgoals.length ? c.subgoals.map(function (s) { return '   - ' + SUB_DESC[s] + '（各跑一次完整搜尋）'; }).join('\n') : '   - （未勾選）';
-    if (c.subMode === 'semantic') return '   - 使用者描述：「' + (c.subText || '（尚未填寫）') + '」\n   - 請把這段描述轉成可由程式檢查的守門條件，先回報再開始。';
-    return '   - 不設守門，只依主目標搜尋。';
+    return '   - 使用者描述：「' + (c.subText || '（尚未填寫）') + '」\n   - 請把這段描述轉成可由程式檢查的守門條件，先回報再開始。';
   }
   function render(c) {
     var map = { STATION: c.station, SPLIT: c.split, MAIN_GOAL: '`' + goalKey(c) + '` = ' + goalDesc(c), SUB_GOALS: subText(c), MAX_GEN: c.maxGen, PATIENCE: c.patience, CHILDREN: c.children, PARALLEL: $('parallel').value };
@@ -488,33 +526,40 @@ footer.status{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4p
   function updateAll() {
     var c = cfg();
     $('goalKey').textContent = goalKey(c);
-    $('goalDesc').textContent = goalDesc(c);
     var present = TOKENS.filter(function (t) { return c.template.indexOf('[[' + t + ']]') >= 0; });
     $('tokList').innerHTML = TOKENS.map(function (t) { return '<span class="tokbg" style="opacity:' + (present.indexOf(t) >= 0 ? 1 : .4) + '">' + t + '</span>'; }).join(' ');
 
     var up = S.upload, st = S.station, exp = EXP[st];
     $('fileName').textContent = up ? up.name : st + '.csv';
-    $('fileRows').textContent = up ? (up.rows.toLocaleString() + ' 小時') : (exp ? '範例測站' : '尚未上傳');
+    $('fileRows').textContent = up ? (up.rows.toLocaleString() + ' 小時') : (exp ? '' : '尚未上傳');
     $('fileOk').textContent = up ? (up.ok ? '✓' : '✕') : (exp ? '✓' : '·');
     $('fileOk').style.color = up ? (up.ok ? 'var(--ok)' : 'var(--err)') : 'var(--muted)';
 
-    var checks = [];
+    // 格式檢查直接標在欄位上：err 擋住開始，warn 只提醒
+    var blocked = false;
+    function mark(errId, msg, level, inputs) {
+      var el = $(errId);
+      el.hidden = !msg; el.textContent = msg || ''; el.classList.toggle('warn', level === 'warn');
+      (inputs || []).forEach(function (id) { $(id).classList.toggle('bad', !!msg && level !== 'warn'); });
+      if (msg && level !== 'warn') blocked = true;
+    }
+    var fileErr = '';
     if (up) {
-      checks.push(up.ok ? ['✓', 'ok', 'CSV 含 觀測時間(hour)、降水量(mm) 等 ' + up.cols.length + ' 欄'] : ['✕', 'err', up.err]);
-      if (!up.station) checks.push(['✕', 'err', '檔名裡找不到 6 碼站號']);
-      if (up.ok) checks.push(up.rain40 > 0 ? ['✓', 'ok', '降水量 ≥ ' + c.threshold + ' mm 的時數 ' + up.rain40 + ' 筆，可算主目標'] : ['✕', 'err', '沒有 ≥ ' + c.threshold + ' mm 的時段，主目標算不出來']);
-    } else if (exp) {
-      checks.push(['✓', 'ok', '使用已上傳過的 data/' + st + '.csv']);
-    } else checks.push(['!', 'warn', '請上傳 data/' + st + '.csv']);
-    var missing = ['MAIN_GOAL', 'SUB_GOALS'].filter(function (t) { return present.indexOf(t) < 0; });
-    checks.push(missing.length ? ['✕', 'err', '技能模板缺少 ' + missing.map(function (t) { return '[[' + t + ']]'; }).join('、')] : ['✓', 'ok', '技能模板 ' + present.length + ' 個 [[欄位]] 都會被填入']);
-    if (c.subMode === 'preset' && !c.subgoals.length) checks.push(['✕', 'err', '至少勾一種副目標']);
-    if (c.subMode === 'semantic' && !c.subText) checks.push(['!', 'warn', '語意描述還是空的']);
+      if (!up.ok) fileErr = up.err;
+      else if (!up.station) fileErr = '檔名裡找不到 6 碼站號';
+      else if (!(up.rain40 > 0)) fileErr = '沒有 ≥ ' + c.threshold + ' mm 的時段，主目標算不出來';
+    }
+    mark('errFile', fileErr);
     var key = $('apiKey').value.trim();
-    checks.push(!key ? ['!', 'warn', '尚未填 OpenRouter Key（原型可略過）'] : /^sk-or-(v1-)?[A-Za-z0-9]{16,}$/.test(key) ? ['✓', 'ok', 'OpenRouter Key 格式正確'] : ['✕', 'err', 'Key 格式應為 sk-or-v1-…']);
-    if (!(c.maxGen >= 2 && c.patience >= 1 && c.children >= 2)) checks.push(['✕', 'err', '演化參數要是正整數（代數 ≥ 2）']);
-    S.blocked = checks.some(function (x) { return x[1] === 'err'; });
-    $('checks').innerHTML = checks.map(function (x) { return '<div><b style="color:var(--' + x[1] + ')">' + x[0] + '</b><span>' + esc(x[2]) + '</span></div>'; }).join('');
+    mark('errKey', key && !/^sk-or-(v1-)?[A-Za-z0-9]{16,}$/.test(key) ? 'Key 格式應為 sk-or-v1-…' : '', 'err', ['apiKey']);
+    mark('errSub', c.subMode === 'preset' && !c.subgoals.length ? '至少勾一種副目標'
+      : c.subMode === 'semantic' && !c.subText ? '請填寫描述' : '', c.subMode === 'semantic' ? 'warn' : 'err', ['subText']);
+    var badEvo = [['maxGen', 2], ['patience', 1], ['children', 2], ['parallel', 1]].filter(function (p) { return !(Number($(p[0]).value) >= p[1]); }).map(function (p) { return p[0]; });
+    ['maxGen', 'patience', 'children', 'parallel'].forEach(function (id) { $(id).classList.toggle('bad', badEvo.indexOf(id) >= 0); });
+    mark('errEvo', badEvo.length ? '要是正整數（最多代數 ≥ 2）' : '');
+    var missing = ['MAIN_GOAL', 'SUB_GOALS'].filter(function (t) { return present.indexOf(t) < 0; });
+    mark('errTpl', missing.length ? '模板缺少 ' + missing.map(function (t) { return '[[' + t + ']]'; }).join('、') : '');
+    S.blocked = blocked;
 
     var skill = render(c);
     S.skill = skill;
@@ -535,22 +580,18 @@ footer.status{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4p
     sha256(canon(c)).then(function (h) {
       if (my !== updateAll.seq) return;
       S.fp = h; S.hit = CACHE[h] || null;
-      var card = $('cacheCard');
-      card.classList.toggle('miss', !S.hit);
-      $('cacheHead').textContent = S.hit ? 'CACHE HIT' : 'CACHE MISS';
-      $('cacheMsg').innerHTML = S.hit
-        ? '這組設定（測站、主目標、副目標、演化參數、技能模板）和 <b class="mono">' + esc(stationLabel(S.hit)) + '</b> 那次完全相同，不必重新訓練，按下就直接展示結果。'
-        : '沒有找到設定完全相同的實驗，按下會開始新的最佳化。';
-      $('cacheHash').textContent = 'config sha256 ' + h.slice(0, 4) + '…' + h.slice(-4);
-      $('startLabel').textContent = S.running ? '停止展示' : S.hit ? '直接展示快取結果' : '開始最佳化 Optimize';
+      $('startLabel').textContent = S.running ? '停止展示' : S.hit ? 'Cache Hit・展示快取結果' : '開始訓練';
     });
   }
   updateAll.seq = 0;
 
-  $('copyCmd').onclick = function () {
-    var t = $('cmd').textContent;
-    (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function () { toast('已複製指令'); }, function () { toast('瀏覽器不允許複製，請手動選取'); });
-  };
+  document.querySelectorAll('[data-pv]').forEach(function (b) {
+    b.onclick = function () {
+      document.querySelectorAll('[data-pv]').forEach(function (x) { x.setAttribute('aria-selected', x === b); });
+      $('pvTpl').hidden = b.dataset.pv !== 'tpl';
+      $('cmd').hidden = b.dataset.pv !== 'cmd';
+    };
+  });
   $('dlSkill').onclick = function () {
     var md = '---\nname: rain-autoresearch-' + S.station + '\ndescription: 依 UI 設定在測站 ' + S.station + ' 執行 LSTM 副目標消融實驗\n---\n\n' + S.skill + '\n';
     var a = document.createElement('a');
@@ -563,7 +604,7 @@ footer.status{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4p
   var timer = null;
   $('startBtn').onclick = function () {
     if (S.running) { stopDemo('已停止展示'); return; }
-    if (S.blocked) { toast('格式檢查還有紅色項目，先修正再開始'); return; }
+    if (S.blocked) { toast('有欄位格式不對，先修正再開始'); return; }
     if (S.hit) { S.view = S.hit; S.sub = 'under'; S.gen = null; renderMain(); renderHist(); toast('命中快取：直接展示 ' + stationLabel(S.hit) + ' 的結果'); return; }
     startDemo();
   };
@@ -621,8 +662,8 @@ footer.status{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4p
     if (!e) return;
     var sg = e.subgoals[S.sub], a = abl(e, S.sub), g1 = abl(e, 'generation1'), ctl = abl(e, 'control');
     $('stId').textContent = e.id; $('stName').textContent = e.name || '';
-    $('stPill').textContent = '三種副目標皆已停止';
-    $('stMeta').textContent = 'RAIN_SPLIT ' + e.split + ' · 訓練期 2009–2022 · 快取結果';
+    $('stPill').textContent = '已完成';
+    $('stMeta').textContent = 'RAIN_SPLIT ' + e.split;
     $('subTabs').innerHTML = ['under', 'total', 'rmse'].map(function (s) { return '<button type="button" role="tab" data-sub="' + s + '" aria-selected="' + (s === S.sub) + '">subgoal_' + s + '</button>'; }).join('');
     $('subTabs').querySelectorAll('button').forEach(function (b) { b.onclick = function () { S.sub = b.dataset.sub; S.gen = null; renderMain(); }; });
 
@@ -631,12 +672,16 @@ footer.status{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4p
     $('stats').innerHTML = [
       ['best ≥40 mm MAE', fmt(a.mae_ge40mm, 2), bestRun + (beat ? '' : '（未勝過第 1 代）')],
       ['第 1 代 / 純 MAE 對照', fmt(g1.mae_ge40mm, 2), '對照組 control_mae ' + fmt(ctl.mae_ge40mm, 2)],
-      ['代數 · 訓練次數', (a.generations || '–') + ' · ' + (a.runs || '–'), '其中實際訓練 ' + (a.trained_runs || '–') + ' 次，其餘沿用快取'],
-      ['守門擋下', a.guard_fail_runs || '0', 'guard_fail，不能當 best']
+      ['整體 MAE', fmt(a.overall_mae, 3), '第 1 代 ' + fmt(g1.overall_mae, 3) + '・對照 ' + fmt(ctl.overall_mae, 3)],
+      ['整體 RMSE', fmt(a.overall_rmse, 3), '第 1 代 ' + fmt(g1.overall_rmse, 3) + '・對照 ' + fmt(ctl.overall_rmse, 3)],
+      ['代數', a.generations || '–', ''],
+      ['訓練次數', a.runs || '–', '實際訓練 ' + (a.trained_runs || '–') + ' 次'],
+      ['守門擋下', a.guard_fail_runs || '0', '']
     ].map(function (s) { return '<div class="stat"><span class="small muted">' + esc(s[0]) + '</span><span class="v">' + esc(s[1]) + '</span><span class="s">' + esc(s[2]) + '</span></div>'; }).join('');
     $('stopMsg').textContent = a.message ? a.message.replace('STOP: 3 consecutive generations without primary-objective progress', 'STOP：連續 3 代主目標沒進步') : '';
 
     drawChart(sg.conv);
+    renderPlots(sg.plots || []);
 
     var gens = []; sg.rows.forEach(function (r) { if (gens.indexOf(r.g) < 0) gens.push(r.g); });
     var bm = bestRun.match(/g(\d+)_c/); var bestGen = bm ? Number(bm[1]) : 1;
@@ -645,13 +690,13 @@ footer.status{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4p
     if (S.gen === 'all') $('genSel').value = 'all';
     $('genSel').onchange = function () { S.gen = this.value === 'all' ? 'all' : Number(this.value); renderMain(); };
     var rows = sg.rows.filter(function (r) { return S.gen === 'all' || r.g === S.gen; });
-    $('tblNote').textContent = (S.gen === 'all' ? '全部 ' + rows.length + ' 次訓練' : '第 ' + S.gen + ' 代 · ' + rows.length + ' 組') + (bestGen === 1 ? ' · 這個副目標的 best 仍是第 1 代' : '');
+    $('tblNote').textContent = rows.length + ' 組';
     $('tbody').innerHTML = rows.map(function (r) {
       var run = 'g' + ('0' + r.g).slice(-2) + '_c' + r.c;
       var isBest = run === bestRun;
       var st = isBest ? '★ best' : r.cache ? '快取 ' + r.cache.replace(/^subgoal_/, '') : r.status;
       var cls = isBest ? 'st-best' : r.cache ? 'muted' : 'st-' + r.status;
-      return '<tr class="' + (isBest ? 'best' : '') + '"><td>' + run + '</td><td>' + r.L + '</td><td>' + r.U + '</td><td>' + r.TS + '</td><td>' + r.B + '</td><td>' + (r.a === 'NA' ? '陳柏孚' : r.a) + '</td><td style="font-weight:600">' + fmt(r.mae, 2) + '</td><td>' + int(r.under) + '</td><td>' + int(r.over) + '</td><td>' + fmt(r.rmse, 3) + '</td><td class="l ' + cls + '">' + esc(st) + '</td></tr>';
+      return '<tr class="' + (isBest ? 'best' : '') + '"><td>' + run + '</td><td>' + r.L + '</td><td>' + r.U + '</td><td>' + r.TS + '</td><td>' + r.B + '</td><td>' + (r.a === 'NA' ? 'WMAE 原始研究' : r.a) + '</td><td style="font-weight:600">' + fmt(r.mae, 2) + '</td><td>' + int(r.under) + '</td><td>' + int(r.over) + '</td><td>' + fmt(r.maeAll, 3) + '</td><td>' + fmt(r.rmse, 3) + '</td><td class="l ' + cls + '">' + esc(st) + '</td></tr>';
     }).join('');
 
     $('footR').textContent = e.id + ' · subgoal_' + S.sub;
@@ -688,24 +733,54 @@ footer.status{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4p
     showFile();
   }
   function showFile() {
-    var e = EXP[S.view] || {}, body = '';
-    if (S.file === 'card') body = e.card;
-    else if (S.file === 'learn') body = e.learnings;
-    else if (S.file === 'abl') body = alignTsv(e.ablationText || '');
-    else if (S.file === 'skill') body = S.skill || '';
+    var e = EXP[S.view] || {}, kind = 'text', body = '';
+    if (S.file === 'card') { kind = 'md'; body = e.card; }
+    else if (S.file === 'learn') { kind = 'md'; body = e.learnings; }
+    else if (S.file === 'abl') { kind = 'tsv'; body = e.ablationText; }
+    else if (S.file === 'skill') { kind = 'md'; body = S.skill; }
     else {
       var r = S.running || S.demoRuns[0];
-      body = r ? r.log.join('\n') : '（這裡會即時顯示 Hermes 的輸出。按「開始最佳化」可看展示模式的模擬紀錄。）';
+      body = r ? r.log.join('\n') : '（尚無輸出）';
     }
-    $('fileBody').textContent = body || '';
+    if (kind === 'md' && !window.marked) kind = 'text';
+    $('fileBody').hidden = kind !== 'text';
+    $('mdBody').hidden = kind !== 'md';
+    $('tsvBody').hidden = kind !== 'tsv';
+    if (kind === 'md') {
+      var html = marked.parse(body || '', { gfm: true });
+      $('mdBody').innerHTML = window.DOMPurify ? DOMPurify.sanitize(html) : html;
+    } else if (kind === 'tsv') renderTsv(body || '');
+    else $('fileBody').textContent = body || '';
   }
-  function alignTsv(t) {
-    var keep = ['subgoal', 'decision', 'runs', 'trained_runs', 'guard_fail_runs', 'generations', 'best_run', 'mae_ge40mm', 'count_under_ge20', 'count_over_ge20', 'overall_rmse'];
+  // ablation.tsv 以可排序表格顯示
+  var tsvSort = { col: -1, dir: 1 };
+  function renderTsv(t) {
+    var keep = ['subgoal', 'decision', 'runs', 'trained_runs', 'guard_fail_runs', 'generations', 'best_run', 'mae_ge40mm', 'count_under_ge20', 'count_over_ge20', 'overall_mae', 'overall_rmse'];
     var lines = t.trim().split('\n').map(function (l) { return l.split('\t'); });
-    var head = lines[0], idx = keep.map(function (k) { return head.indexOf(k); }).filter(function (i) { return i >= 0; });
-    var rows = lines.map(function (l) { return idx.map(function (i) { var v = l[i] || ''; return /^\d+\.\d{4,}$/.test(v) ? Number(v).toFixed(3) : v; }); });
-    var w = idx.map(function (_, j) { return Math.max.apply(null, rows.map(function (r) { return r[j].length; })); });
-    return rows.map(function (r) { return r.map(function (v, j) { return (v + '                    ').slice(0, w[j] + 2); }).join(''); }).join('\n');
+    var head = lines[0] || [], idx = keep.map(function (k) { return head.indexOf(k); }).filter(function (i) { return i >= 0; });
+    var isNum = function (v) { return v !== '' && !isNaN(Number(v)); };
+    var rows = lines.slice(1).map(function (l) { return idx.map(function (i) { return l[i] || ''; }); });
+    if (tsvSort.col >= 0) {
+      var j = tsvSort.col;
+      rows.sort(function (a, b) {
+        var x = a[j], y = b[j];
+        var d = isNum(x) && isNum(y) ? Number(x) - Number(y) : x.localeCompare(y);
+        return d * tsvSort.dir;
+      });
+    }
+    var show = function (v) { return /^-?\d+\.\d{4,}$/.test(v) ? Number(v).toFixed(3) : v; };
+    $('tsvBody').innerHTML = '<div class="df"><table><thead><tr>' +
+      idx.map(function (i, j) { return '<th scope="col" class="sortable" data-j="' + j + '">' + esc(head[i]) + (tsvSort.col === j ? '<span class="arr">' + (tsvSort.dir > 0 ? '▲' : '▼') + '</span>' : '') + '</th>'; }).join('') +
+      '</tr></thead><tbody>' +
+      rows.map(function (r) { return '<tr>' + r.map(function (v) { return '<td' + (isNum(v) ? '' : ' class="l"') + '>' + esc(show(v)) + '</td>'; }).join('') + '</tr>'; }).join('') +
+      '</tbody></table></div>';
+    $('tsvBody').querySelectorAll('th').forEach(function (th) {
+      th.onclick = function () {
+        var j = Number(th.dataset.j);
+        tsvSort = tsvSort.col === j ? { col: j, dir: -tsvSort.dir } : { col: j, dir: 1 };
+        renderTsv(t);
+      };
+    });
   }
 
   /* ---------- history ---------- */
@@ -715,7 +790,7 @@ footer.status{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4p
     S.demoRuns.forEach(function (r) { items.push({ id: r.id, name: r.station, status: r.done ? '展示結束' : '執行中', color: r.done ? 'var(--muted)' : 'var(--accent)', detail: 'subgoal_' + r.sub + ' · 第 ' + r.gen + ' 代', demo: true }); });
     Object.keys(EXP).forEach(function (id) {
       var e = EXP[id], a = abl(e, 'under');
-      items.push({ id: id, name: e.name, status: '完成', color: 'var(--ok)', detail: 'best ' + fmt(a.mae_ge40mm, 2) + ' mm（under）· 可重用快取' });
+      items.push({ id: id, name: e.name, status: '完成', color: 'var(--ok)', detail: 'best ' + fmt(a.mae_ge40mm, 2) + ' mm' });
     });
     items = items.filter(function (it) { return !q || (it.id + ' ' + (it.name || '')).indexOf(q) >= 0; });
     $('hist').innerHTML = items.map(function (it) {
@@ -733,6 +808,19 @@ footer.status{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4p
     });
   }
   $('histQ').addEventListener('input', renderHist);
+
+  /* ---------- prediction plots ---------- */
+  function renderPlots(plots) {
+    $('plotBox').hidden = !plots.length;
+    if (!plots.length) return;
+    if (!(S.plot < plots.length)) S.plot = 0;
+    $('plotNote').textContent = plots[0].run;
+    $('plotTabs').innerHTML = plots.map(function (p, i) { return '<button type="button" role="tab" data-p="' + i + '" aria-selected="' + (i === S.plot) + '">' + esc(p.label) + '</button>'; }).join('');
+    $('plotTabs').querySelectorAll('button').forEach(function (b) { b.onclick = function () { S.plot = Number(b.dataset.p); renderPlots(plots); }; });
+    var p = plots[S.plot];
+    $('plotImg').src = p.src; $('plotImg').alt = p.label + '預測圖（' + p.run + '）';
+    $('plotLink').href = p.src;
+  }
 
   $('loadCfg').onclick = function () {
     S.station = S.view; S.upload = null; $('stationSel').value = S.view;
