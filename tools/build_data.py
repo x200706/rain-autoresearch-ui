@@ -1,7 +1,7 @@
 """把 rain_autoresearch 的 outputs/<station>/ 轉成原型用的 data/experiments.js。
 
 用法（在本 repo 根目錄）：
-    python tools/build_data.py D:/rain_autoresearch/outputs 467590 467571 467490
+    python tools/build_data.py D:/rain_autoresearch/outputs 466910 467490 467571 467590 467650
 
 讀 station_card.md、learnings.md、ablation.tsv、control.json，
 以及三種副目標的 convergence.csv 與 results.tsv（皆為訓練期指標）。
@@ -14,7 +14,7 @@ import shutil
 import sys
 from pathlib import Path
 
-NAMES = {"467590": "恆春", "467490": "臺中"}
+NAMES = {"466910": "鞍部", "467490": "臺中", "467571": "新竹", "467590": "恆春", "467650": "日月潭"}
 SUBGOALS = ["under", "total", "rmse"]
 DEST = Path(__file__).resolve().parent.parent / "data"
 # (標籤, 檔名樣式)；局部放大的日期區間依測站而定，用 glob 找
