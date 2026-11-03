@@ -15,6 +15,9 @@ def _layout(fig: go.Figure, height: int, ytitle: str, xtitle: str) -> go.Figure:
         plot_bgcolor="rgba(0,0,0,0)", font=dict(family="JetBrains Mono, Segoe UI, Microsoft JhengHei", size=13),
         legend=dict(orientation="h", yanchor="bottom", y=1.0, x=0, bgcolor="rgba(0,0,0,0)"),
         hovermode="x unified", dragmode="zoom",
+        # Plotly 預設把工具列底色算成「圖表背景色、透明度 0.5」；背景是透明的 rgba(0,0,0,0)，
+        # 算出來就是半透明黑，淺色模式會變成一塊深灰框。這裡明確給透明底色，圖示顏色交給 CSS
+        modebar=dict(bgcolor="rgba(0,0,0,0)", color=MUTED, activecolor=ACCENT),
     )
     fig.update_xaxes(title_text=xtitle, gridcolor=GRID, zeroline=False, linecolor=GRID)
     fig.update_yaxes(title_text=ytitle, gridcolor=GRID, zeroline=False, linecolor=GRID, rangemode="tozero")

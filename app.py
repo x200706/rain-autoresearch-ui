@@ -16,28 +16,40 @@ SOURCES = [("已有資料的測站", "existing"), ("上傳新測站 CSV", "uploa
 SUB_CHOICES = [(f"{s}｜{stations.SUBGOALS[s]['desc']}", s) for s in SUBGOAL_ORDER]
 METRIC_CHOICES = [("MAE（越低越好）", "mae"), ("RMSE（越低越好）", "rmse"), ("低估筆數（越少越好）", "under")]
 PRED_SPLITS = [("訓練集", "train"), ("測試集", "test")]
-# 深淺色：按鈕切換時用 Gradio 自己的 ?__theme= 重新載入，所有元件（含程式碼編輯器）一起套用；
-# 第一次開頁（網址沒有 __theme）時在載入後直接套用記住的模式，不在載入中轉址（會讓頁面卡住）。
-THEME_MODE_JS = """
-  const raThemeMode = () => {
-    const fromUrl = new URLSearchParams(location.search).get('__theme');
-    let saved = null;
-    try { saved = localStorage.getItem('ra-theme'); } catch (e) {}
-    return fromUrl || saved || 'dark';
-  };
-"""
+# 深淺色只切換 body 的 dark class（所有顏色都是 CSS 變數），不重新載入頁面，看到一半也不會中斷。
+# 選擇記在 localStorage；Gradio 跟著系統深淺色自己改模式時，監看器會改回使用者選的。
 HIST_JS = """
 () => {
-""" + THEME_MODE_JS + """
-  const mode = raThemeMode();
-  document.body.classList.toggle('dark', mode === 'dark');
-  document.documentElement.style.colorScheme = mode;
-  // 主題按鈕顯示「目前」的模式，滑鼠提示說明按下去會切到哪一種
-  const themeBtn = document.getElementById('theme-btn');
-  if (themeBtn) {
-    themeBtn.textContent = mode === 'dark' ? '☾ 深色模式' : '☀ 淺色模式';
-    themeBtn.title = mode === 'dark' ? '切換為淺色模式' : '切換為深色模式';
+  if (!window.raApplyTheme) {
+    window.raThemeMode = () => {
+      let saved = null;
+      try { saved = localStorage.getItem('ra-theme'); } catch (e) {}
+      return saved || new URLSearchParams(location.search).get('__theme') || 'dark';
+    };
+    window.raApplyTheme = (mode) => {
+      const dark = mode === 'dark';
+      if (document.body.classList.contains('dark') !== dark) document.body.classList.toggle('dark', dark);
+      document.documentElement.style.colorScheme = mode;
+      // 主題按鈕顯示「目前」的模式，滑鼠提示說明按下去會切到哪一種
+      const themeBtn = document.getElementById('theme-btn');
+      if (themeBtn) {
+        themeBtn.textContent = dark ? '☾ 深色模式' : '☀ 淺色模式';
+        themeBtn.title = dark ? '切換為淺色模式' : '切換為深色模式';
+      }
+    };
+    // 切換按鈕直接在瀏覽器處理，不經過 Gradio 的事件佇列：頁面還在載入圖表時按也會立刻生效
+    document.addEventListener('click', (event) => {
+      if (!event.target.closest('#theme-btn')) return;
+      const next = window.raThemeMode() === 'dark' ? 'light' : 'dark';
+      try { localStorage.setItem('ra-theme', next); } catch (e) {}
+      window.raApplyTheme(next);
+    });
+    new MutationObserver(() => {
+      const want = window.raThemeMode() === 'dark';
+      if (document.body.classList.contains('dark') !== want) window.raApplyTheme(window.raThemeMode());
+    }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
   }
+  window.raApplyTheme(window.raThemeMode());
   if (window.__raHistClick) return;
   window.__raHistClick = true;
   // 右側卡片：把 data-hist 寫進隱藏欄位，再按隱藏按鈕，交給 Python 切換主畫面
@@ -50,14 +62,6 @@ HIST_JS = """
     field.dispatchEvent(new Event('input', { bubbles: true }));
     setTimeout(() => document.getElementById('hist-go')?.click(), 0);
   });
-}
-"""
-TOGGLE_JS = """
-() => {
-""" + THEME_MODE_JS + """
-  const next = raThemeMode() === 'dark' ? 'light' : 'dark';
-  try { localStorage.setItem('ra-theme', next); } catch (e) {}
-  location.href = location.pathname + '?__theme=' + next;
 }
 """
 
@@ -334,7 +338,6 @@ def build() -> gr.Blocks:
         view_key = gr.State(first_view)
 
         # ---------------- wiring
-        theme_btn.click(None, js=TOGGLE_JS)
         left_inputs = [api_key, model, run_name, source, station, upload_state, split, metric, thr, sub_mode, subs,
                        sub_text, max_gen, patience, children, parallel, template]
         left_outputs = [err_key, err_model, err_file, chip, err_goal, goal_key, err_sub, err_evo, err_tpl, tokens, shell,

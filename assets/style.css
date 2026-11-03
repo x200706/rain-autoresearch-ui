@@ -164,6 +164,8 @@ h3.lbl .tok { letter-spacing: 0; }
 
 /* 圖表跟著深淺色：Plotly 的文字與按鈕改用介面的顏色 */
 .js-plotly-plot .main-svg text { fill: var(--body-text-color) !important; }
+/* 工具列底色：Plotly 會寫在元素上，這裡一律蓋成透明，淺色模式不再出現深灰框 */
+.js-plotly-plot .modebar, .js-plotly-plot .modebar-group { background: transparent !important; background-color: transparent !important; }
 .js-plotly-plot .modebar-btn path { fill: var(--body-text-color-subdued) !important; }
 .js-plotly-plot .modebar-btn.active path, .js-plotly-plot .modebar-btn:hover path { fill: var(--ra-accent) !important; }
 .js-plotly-plot .rangeslider-mask-min, .js-plotly-plot .rangeslider-mask-max { fill: var(--body-text-color) !important; fill-opacity: .12 !important; }
