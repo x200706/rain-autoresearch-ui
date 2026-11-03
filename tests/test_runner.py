@@ -97,3 +97,74 @@ def test_run_with_fewer_subgoals_finishes_when_those_stop(rain_root):
     assert runner.progress.detect("466930", 0.0, ["under"]).complete
     assert not runner.progress.detect("466930", 0.0, ["under", "total"]).complete
     assert run["config"]["subgoals"] == ["under"]
+
+
+def test_log_decoding_handles_utf8_and_windows_big5():
+    assert runner.decode_line("讀取 program.md".encode("utf-8")) == "讀取 program.md"
+    assert runner.decode_line("讀取 program.md".encode("cp950")) == "讀取 program.md"
+
+
+FAKE_BIG5_HERMES = textwrap.dedent('''
+    """假的 Hermes：像 Windows 上用 -I 啟動的 Python 一樣，輸出 cp950，不理 PYTHONIOENCODING。"""
+    import sys
+    sys.stdout.buffer.write("Session: sess-123\\n".encode("cp950"))
+    sys.stdout.buffer.write(("我先讀取 program.md " + " ".join(sys.argv[1:])).encode("cp950") + b"\\n")
+    sys.stdout.flush()
+''')
+
+
+def _wait_exit(run_id):
+    runner._PROCS[run_id].wait(timeout=30)
+    for _ in range(50):                        # 等讀取執行緒把最後幾行寫完
+        if "program.md" in (runner.log_tail(runner.get_run(run_id)) or ""):
+            break
+        time.sleep(0.1)
+
+
+def test_continue_reuses_the_record_and_resumes_a_short_session(rain_root, tmp_path, monkeypatch):
+    fake = tmp_path / "big5_hermes.py"
+    fake.write_text(FAKE_BIG5_HERMES, encoding="utf-8")
+    monkeypatch.setenv("HERMES_CMD", f"{sys.executable}|{fake}")
+    make_csv(rain_root / "data" / "466930.csv")
+    (rain_root / "outputs" / "466930" / "experiments" / "g00_gate").mkdir(parents=True)   # 做到一半
+    assert runner.can_continue("466930")
+    run = runner.start_run(cfg(), mode="real")
+    _wait_exit(run["id"])
+    log = runner.log_tail(runner.get_run(run["id"]))
+    assert "我先讀取 program.md" in log                     # cp950 輸出也不會變亂碼
+    assert "中斷後續跑" in (tmp_path / "ui_state" / run["id"] / "prompt.txt").read_text(encoding="utf-8")
+    runner.poll(run["id"])
+    assert runner.get_run(run["id"])["status"] == "failed"   # 沒做完就結束
+    assert runner.continue_target("466930")["id"] == run["id"]
+
+    again = runner.continue_run(run["id"], cfg())
+    assert again["id"] == run["id"] and again["status"] == "running" and again["resumes"] == 1
+    assert [r["id"] for r in runner.load_runs()] == [run["id"]]          # 沒有新增一筆
+    _wait_exit(run["id"])
+    log = runner.log_tail(runner.get_run(run["id"]))
+    assert "第 1 次接續（接續舊對話 sess-123）" in log and "--resume sess-123" in log
+    skill = (tmp_path / "ui_state" / run["id"] / "SKILL.md").read_text(encoding="utf-8")
+    assert "## 中斷後續跑" in skill
+
+
+def test_long_session_is_not_resumed(rain_root, tmp_path, monkeypatch):
+    fake = tmp_path / "big5_hermes.py"
+    fake.write_text(FAKE_BIG5_HERMES, encoding="utf-8")
+    monkeypatch.setenv("HERMES_CMD", f"{sys.executable}|{fake}")
+    monkeypatch.setattr(runner, "RESUME_SESSION_MAX_BYTES", 10)
+    make_csv(rain_root / "data" / "466930.csv")
+    (rain_root / "outputs" / "466930").mkdir(parents=True)
+    run = runner.start_run(cfg(), mode="real")
+    _wait_exit(run["id"])
+    runner.poll(run["id"])
+    runner.continue_run(run["id"], cfg())
+    _wait_exit(run["id"])
+    log = runner.log_tail(runner.get_run(run["id"]))
+    assert "第 1 次接續（開新對話）" in log and "--resume" not in log.split("第 1 次接續")[1]
+
+
+def test_continue_looks_at_the_split_directory(rain_root):
+    (rain_root / "outputs" / "467350_split73" / "experiments").mkdir(parents=True)
+    assert runner.can_continue("467350", "73") and not runner.can_continue("467350", "82")
+    assert runner.progress.detect("467350", split="73").stage == "prep"
+    assert runner.progress.detect("467350", split="82").stage == "spec"

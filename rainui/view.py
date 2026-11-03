@@ -56,8 +56,10 @@ def history_items(query: str = "") -> list[dict]:
         kind = STATUS_KIND.get(run["status"], "muted")
         if run["mode"] == "demo":
             status, kind = ("展示中", "run") if run["status"] == "running" else ("展示", "muted")
-        items.append({"key": f"run:{run['id']}", "title": run["name"],
-                      "tags": [(stations.label(run["station"]), "station"), (status, kind), (when, "muted")]})
+        tags = [(stations.label(run["station"]), "station"), (status, kind), (when, "muted")]
+        if run.get("resumes"):
+            tags.insert(2, (f"第 {run['resumes']} 次接續", "muted"))
+        items.append({"key": f"run:{run['id']}", "title": run["name"], "tags": tags})
     started = [sid for _, sid in stations.station_choices() if (config.outputs_dir() / sid).exists()]
     entries = [(sid, results.load_station(sid), stations.is_complete(sid)) for sid in started]
     if not started:                                          # 沒有 rain_autoresearch：顯示原型附的資料

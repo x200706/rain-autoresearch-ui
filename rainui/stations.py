@@ -66,10 +66,10 @@ def subgoals_stopped(ablation: Path, expected: list | None) -> bool:
     return bool(expected) and all(decision.get(s) == "stop" for s in expected)
 
 
-def is_complete(station: str, expected=LATEST) -> bool:
+def is_complete(station: str, expected=LATEST, split: str = "82") -> bool:
     """這次要跑的副目標都已停止，且學習紀錄已寫好。判定照抄 ablation.tsv 的 decision 欄，介面不自己推論；
     第 2 代就停止（best 是第 1 代）的副目標也是 stop，算完成。"""
-    sd = config.outputs_dir() / station
+    sd = config.station_dir(station, split)
     if not (sd / "learnings.md").exists():
         return False
     if expected == LATEST:

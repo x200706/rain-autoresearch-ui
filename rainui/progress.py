@@ -42,10 +42,10 @@ def _mtime(path: Path) -> float:
     return path.stat().st_mtime if path.exists() else 0.0
 
 
-def detect(station: str, started: float = 0.0, expected=LATEST) -> Progress:
+def detect(station: str, started: float = 0.0, expected=LATEST, split: str = "82") -> Progress:
     """started 之後才出現或更新的「完成」檔案才算數，避免舊紀錄讓新實驗一開始就顯示完成。
     expected：這次要跑的副目標（stations.run_subgoals）；預設照這個測站最近一次介面實驗。"""
-    sd = config.outputs_dir() / station
+    sd = config.station_dir(station, split)          # 7:3 等其他切分的紀錄在 outputs/<站號>_split<切分>
     if not sd.exists():
         return Progress("spec", detail="讀取 program.md 與介面產生的技能")
     gate_dir = sd / "experiments" / "g00_gate"

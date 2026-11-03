@@ -34,6 +34,11 @@ def outputs_dir() -> Path:
     return rain_root() / "outputs"
 
 
+def station_dir(station: str, split: str = "82") -> Path:
+    """一次實驗的紀錄目錄，與 budget_guard.py 相同：8:2 是 outputs/<站號>，其他切分是 outputs/<站號>_split<切分>。"""
+    return outputs_dir() / (station if str(split) == "82" else f"{station}_split{split}")
+
+
 def data_dir() -> Path:
     return rain_root() / "data"
 

@@ -105,13 +105,25 @@ def override_section(cfg: RunConfig) -> str:
     return "\n".join(lines)
 
 
-def render(cfg: RunConfig) -> str:
+RESUME_SECTION = "\n".join([
+    "## 中斷後續跑（這次是接續上一次被中斷的實驗）",
+    "這個測站已經有做到一半的紀錄。不要從頭開始，也不要重做已記錄的訓練：",
+    "1. 依 program.md「開始前」：沒有 gate.json 才從第 0 步開始；否則依 under → total → rmse 跑 "
+    "`budget_guard.py status`，從第一個還沒停止的副目標接著做。",
+    "2. 依 program.md「中斷後續跑」：已建立但未記錄的 experiment 目錄，有 `metrics/result.json` 就用 RESUME=1 補紀錄；"
+    "沒有就改名為 `<原名>_interrupted` 保留，用新目錄重跑同一個設定檔。",
+    "3. 已產生的子代紀錄、設定檔、測站資訊卡都沿用，不重抽、不覆寫。",
+    "",
+])
+
+
+def render(cfg: RunConfig, resume: bool = False) -> str:
     values = {"STATION": cfg.station, "SPLIT": cfg.split, "RUN_NAME": cfg.run_name or "（未命名）",
               "MAIN_GOAL": f"`{goal_key(cfg)}` = {goal_desc(cfg)}", "SUB_GOALS": subgoal_lines(cfg),
               "MAX_GEN": cfg.max_gen, "PATIENCE": cfg.patience, "CHILDREN": cfg.children, "PARALLEL": cfg.parallel}
     body = re.sub(r"\[\[([A-Z_]+)\]\]", lambda m: str(values[m.group(1)]) if m.group(1) in values else m.group(0),
                   cfg.template.replace("\r", ""))
-    section = override_section(cfg)
+    section = override_section(cfg) + (RESUME_SECTION if resume else "")
     if section:
         first, _, rest = body.partition("\n")
         body = f"{first}\n\n{section}{rest.lstrip()}"
@@ -123,9 +135,9 @@ def skill_name(cfg: RunConfig) -> str:
     return f"rain-autoresearch-{cfg.station}" + (f"-{slug}" if slug else "")
 
 
-def skill_markdown(cfg: RunConfig) -> str:
+def skill_markdown(cfg: RunConfig, resume: bool = False) -> str:
     return (f"---\nname: {skill_name(cfg)}\n"
-            f"description: 依介面設定在測站 {cfg.station} 執行 LSTM 副目標消融實驗\n---\n\n{render(cfg)}\n")
+            f"description: 依介面設定在測站 {cfg.station} 執行 LSTM 副目標消融實驗\n---\n\n{render(cfg, resume)}\n")
 
 
 def strip_frontmatter(text: str) -> str:
@@ -137,13 +149,20 @@ def strip_frontmatter(text: str) -> str:
     return text
 
 
-def query_text(cfg: RunConfig) -> str:
+def query_text(cfg: RunConfig, resume: bool = False) -> str:
+    if resume:
+        return (f"這是中斷後續跑：依技能 {skill_name(cfg)} 與 program.md「開始前」「中斷後續跑」，"
+                f"先對測站 {cfg.station} 的副目標跑 status，從中斷的地方接著做，不要重做已記錄的訓練；"
+                "全部停止後依 program.md 第 5 節寫報告與學習紀錄。")
     return f"依技能 {skill_name(cfg)} 在測站 {cfg.station} 執行副目標消融實驗；完成後依 program.md 第 5 節寫報告與學習紀錄。"
 
 
-def hermes_args(cfg: RunConfig, root: str, query_file: str, api_key: str = "") -> list[str]:
+def hermes_args(cfg: RunConfig, root: str, query_file: str, api_key: str = "", session: str = "") -> list[str]:
+    """session 有值時接續 Hermes 的舊對話（--resume），否則開新對話。"""
     args = ["chat", "--provider", "openrouter", "-m", cfg.model, "-s", skill_name(cfg), "--yolo", "-Q",
             "--format", "stream-json", "--in", root, "--query-file", query_file]
+    if session:
+        args += ["--resume", session]
     if api_key:
         args += ["--api-key", api_key]
     return args

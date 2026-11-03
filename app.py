@@ -104,7 +104,8 @@ def refresh_left(api_key, *values):
         return gr.update(value=level_msg[1] if level_msg else "", visible=bool(level_msg))
 
     hit = view.cache_index().get(skill.fingerprint(cfg)) if not skill.blocking(errors) else None
-    label = "Cache Hit・展示快取結果" if hit else "開始訓練"
+    # 測站已有做到一半的紀錄：按下去是接著做，不是從頭來
+    label = "Cache Hit・展示快取結果" if hit else ("繼續實驗" if runner.can_continue(cfg.station, cfg.split) else "開始訓練")
     try:
         key_text = skill.goal_key(cfg)
     except (TypeError, ValueError):
@@ -385,8 +386,12 @@ def build() -> gr.Blocks:
         def _launch(cfg, api, values):
             upload_info = values[4]
             try:
-                run = runner.start_run(cfg, api_key=api or "",
-                                       upload_path=upload_info["path"] if values[2] == "upload" and upload_info else "")
+                target = runner.continue_target(cfg.station, cfg.split) if runner.can_continue(cfg.station, cfg.split) else None
+                if target:          # 繼續實驗：沿用原本那筆紀錄，不新增
+                    run = runner.continue_run(target["id"], cfg, api_key=api or "")
+                else:
+                    run = runner.start_run(cfg, api_key=api or "",
+                                           upload_path=upload_info["path"] if values[2] == "upload" and upload_info else "")
             except (ValueError, RuntimeError, OSError) as exc:
                 gr.Warning(str(exc), duration=4)
                 return gr.update()
