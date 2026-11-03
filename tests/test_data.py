@@ -84,3 +84,59 @@ def test_bundle_fallback_when_no_outputs(monkeypatch, tmp_path):
     results.load_bundle.cache_clear()
     st = results.load_station("467590")
     assert st is not None and st["subgoals"]["under"]["best_run"]
+
+
+def _set_decisions(sd, decisions, runs=None):
+    """改 ablation.tsv 的 decision（與 runs）欄；decisions 裡沒有的副目標整列刪掉。"""
+    lines = (sd / "ablation.tsv").read_text(encoding="utf-8").splitlines()
+    head = lines[0].split("\t")
+    di, ri, si = head.index("decision"), head.index("runs"), head.index("subgoal")
+    out = [lines[0]]
+    for line in lines[1:]:
+        cells = line.split("\t")
+        s = cells[si]
+        if s in ("generation1", "control"):
+            out.append(line)
+            continue
+        if s not in decisions:
+            continue
+        cells[di] = decisions[s]
+        if runs and s in runs:
+            cells[ri] = str(runs[s])
+        out.append("\t".join(cells))
+    (sd / "ablation.tsv").write_text("\n".join(out) + "\n", encoding="utf-8")
+
+
+def _record_run(rain_root, station, **config):
+    import json
+    state = rain_root.parent / "ui_state"
+    state.mkdir(exist_ok=True)
+    run = {"id": "r1", "station": station, "mode": "real", "config": {"sub_mode": "preset", **config}}
+    (state / "runs.json").write_text(json.dumps([run]), encoding="utf-8")
+
+
+def test_only_the_chosen_subgoals_must_stop(rain_root):
+    sd = make_station(rain_root, "466930")
+    _set_decisions(sd, {"under": "stop", "total": "continue", "rmse": "continue"}, runs={"total": 0, "rmse": 0})
+    assert not stations.is_complete("466930")                            # 沒有介面紀錄：三種都要停
+    _record_run(rain_root, "466930", subgoals=["under"])
+    assert stations.is_complete("466930")                                # 這次只勾 under
+    assert not stations.is_complete("466930", ["under", "rmse"])
+
+
+def test_semantic_subgoal_counts_the_subgoals_that_ran(rain_root):
+    sd = make_station(rain_root, "466930")
+    _set_decisions(sd, {"under": "continue", "total": "continue", "rmse": "stop"}, runs={"under": 0, "total": 0})
+    _record_run(rain_root, "466930", sub_mode="semantic", subgoals=[])
+    assert stations.is_complete("466930")                                # 自訂副目標由 Hermes 命名；看有跑的
+    _set_decisions(sd, {"under": "continue", "total": "continue", "rmse": "continue"})
+    assert not stations.is_complete("466930")
+
+
+def test_subgoal_stopped_at_generation_2_counts_as_complete(rain_root):
+    sd = make_station(rain_root, "466930")
+    lines = (sd / "ablation.tsv").read_text(encoding="utf-8").replace(
+        "STOP: 3 consecutive generations without primary-objective progress",
+        "STOP: no generation-2 run met the sub-goal cap")
+    (sd / "ablation.tsv").write_text(lines, encoding="utf-8")
+    assert stations.is_complete("466930")

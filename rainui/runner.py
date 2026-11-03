@@ -12,6 +12,7 @@ from pathlib import Path
 
 from . import config, progress
 from .skill import RunConfig, hermes_args, query_text, skill_markdown, skill_name
+from .stations import run_subgoals
 
 _LOCK = threading.Lock()
 _PROCS: dict[str, subprocess.Popen] = {}
@@ -115,7 +116,7 @@ def poll(run_id: str) -> tuple[dict | None, progress.Progress]:
         if p.complete and run["status"] == "running":
             run = _update(run_id, status="done", ended=time.time())
         return run, p
-    p = progress.detect(run["station"], run["started"])
+    p = progress.detect(run["station"], run["started"], run_subgoals(run.get("config") or {}))
     if run["status"] != "running":
         return run, p
     proc = _PROCS.get(run_id)

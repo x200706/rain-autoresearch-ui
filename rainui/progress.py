@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import config
-from .stations import SUBGOAL_ORDER, SUBGOALS
+from .stations import LATEST, SUBGOAL_ORDER, SUBGOALS, expected_subgoals, subgoals_stopped
 
 STAGES = [
     ("spec", "讀取規範", "program.md 與技能"),
@@ -42,8 +42,9 @@ def _mtime(path: Path) -> float:
     return path.stat().st_mtime if path.exists() else 0.0
 
 
-def detect(station: str, started: float = 0.0) -> Progress:
-    """started 之後才出現或更新的「完成」檔案才算數，避免舊紀錄讓新實驗一開始就顯示完成。"""
+def detect(station: str, started: float = 0.0, expected=LATEST) -> Progress:
+    """started 之後才出現或更新的「完成」檔案才算數，避免舊紀錄讓新實驗一開始就顯示完成。
+    expected：這次要跑的副目標（stations.run_subgoals）；預設照這個測站最近一次介面實驗。"""
     sd = config.outputs_dir() / station
     if not sd.exists():
         return Progress("spec", detail="讀取 program.md 與介面產生的技能")
@@ -57,8 +58,9 @@ def detect(station: str, started: float = 0.0) -> Progress:
     if not (sd / "control.json").exists():
         return Progress("control", detail="預設參數＋純 MAE 訓練一次")
     learnings, ablation = sd / "learnings.md", sd / "ablation.tsv"
-    if _mtime(learnings) > started and _mtime(ablation) > started and all(
-            _rows(sd / f"subgoal_{s}" / "results.tsv") for s in SUBGOAL_ORDER):
+    if expected == LATEST:
+        expected = expected_subgoals(station)
+    if _mtime(learnings) > started and _mtime(ablation) > started and subgoals_stopped(ablation, expected):
         return Progress("report", complete=True, detail="報告與學習紀錄已完成")
     if _mtime(ablation) > started:
         return Progress("report", detail="彙整消融比較表與學習紀錄")

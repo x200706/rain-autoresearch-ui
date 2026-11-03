@@ -1,5 +1,6 @@
 """測站名稱、可選測站清單與上傳 CSV 的檢查。"""
 import io
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,16 +30,51 @@ def label(station: str) -> str:
     return f"{station} {name}".strip()
 
 
-def is_complete(station: str) -> bool:
-    """三種副目標都已停止，且學習紀錄已寫好。判定照抄 ablation.tsv 的 decision 欄
-    （budget_guard.py ablation 依程式的停止規則寫出），介面不自己推論。"""
-    sd = config.outputs_dir() / station
-    ablation = sd / "ablation.tsv"
-    if not (ablation.exists() and (sd / "learnings.md").exists()):
+LATEST = "latest"   # is_complete／progress.detect 的預設：照這個測站最近一次介面實驗選的副目標
+
+
+def run_subgoals(cfg: dict) -> list | None:
+    """一次介面實驗要跑的副目標。預設副目標回傳勾選的那幾種；一句話自訂的副目標名稱由 Hermes 寫進程式，
+    介面事先不知道，回傳 None。"""
+    if cfg.get("sub_mode") == "semantic":
+        return None
+    return [s for s in SUBGOAL_ORDER if s in (cfg.get("subgoals") or [])]
+
+
+def expected_subgoals(station: str) -> list | None:
+    """這個測站最近一次真的實驗（展示模式不算）選的副目標；沒有介面紀錄、直接照 program.md 跑的測站是三種預設副目標。"""
+    path = config.state_dir() / "runs.json"
+    try:
+        runs = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+    except json.JSONDecodeError:
+        runs = []
+    run = next((r for r in runs if r.get("station") == station and r.get("mode") == "real"), None)
+    return run_subgoals(run.get("config") or {}) if run else list(SUBGOAL_ORDER)
+
+
+def subgoals_stopped(ablation: Path, expected: list | None) -> bool:
+    """ablation.tsv 的 decision 欄（budget_guard.py ablation 依程式的停止規則寫出）裡，這次要跑的副目標都是 stop。
+    expected 為 None（自訂副目標）時，看有紀錄（runs > 0）的副目標，至少一種且全部 stop；沒跑的預設副目標不算。"""
+    if not ablation.exists():
         return False
     rows = pd.read_csv(ablation, sep="\t", dtype=str).fillna("")
-    decided = rows[rows["subgoal"].isin(SUBGOAL_ORDER)]
-    return len(decided) == 3 and (decided["decision"] == "stop").all()
+    subs = rows[~rows["subgoal"].isin(["generation1", "control"])]
+    if expected is None:
+        ran = subs[pd.to_numeric(subs["runs"], errors="coerce").fillna(0) > 0]
+        return len(ran) > 0 and bool((ran["decision"] == "stop").all())
+    decision = dict(zip(subs["subgoal"], subs["decision"]))
+    return bool(expected) and all(decision.get(s) == "stop" for s in expected)
+
+
+def is_complete(station: str, expected=LATEST) -> bool:
+    """這次要跑的副目標都已停止，且學習紀錄已寫好。判定照抄 ablation.tsv 的 decision 欄，介面不自己推論；
+    第 2 代就停止（best 是第 1 代）的副目標也是 stop，算完成。"""
+    sd = config.outputs_dir() / station
+    if not (sd / "learnings.md").exists():
+        return False
+    if expected == LATEST:
+        expected = expected_subgoals(station)
+    return subgoals_stopped(sd / "ablation.tsv", expected)
 
 
 def station_choices() -> list[tuple[str, str]]:

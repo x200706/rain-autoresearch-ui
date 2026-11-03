@@ -85,3 +85,15 @@ def test_notes_are_saved_per_run_and_per_station(rain_root):
     runner.save_station_notes("467590", "恆春備註")
     assert runner.load_station_notes("467590") == "恆春備註"
     assert not (rain_root / "outputs" / "467590").exists()          # 備註不寫進實驗紀錄
+
+
+def test_run_with_fewer_subgoals_finishes_when_those_stop(rain_root):
+    from conftest import write_tsv
+    sd = make_station(rain_root, "466930")
+    rows = [{"subgoal": "under", "decision": "stop", "runs": 2}, {"subgoal": "total", "decision": "continue", "runs": 0},
+            {"subgoal": "rmse", "decision": "continue", "runs": 0}]
+    write_tsv(sd / "ablation.tsv", ["subgoal", "decision", "runs"], rows)
+    run = runner.start_run(RunConfig(station="466930", model="m", subgoals=["under"]), mode="demo")
+    assert runner.progress.detect("466930", 0.0, ["under"]).complete
+    assert not runner.progress.detect("466930", 0.0, ["under", "total"]).complete
+    assert run["config"]["subgoals"] == ["under"]
