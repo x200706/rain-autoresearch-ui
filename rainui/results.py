@@ -106,7 +106,9 @@ def load_bundle() -> dict:
             station["subgoals"][s] = {"rows": rows, "conv": sg["conv"], "best_run": best,
                                       "decision": by_sub.get(s, {}).get("decision", ""),
                                       "message": by_sub.get(s, {}).get("message", ""),
-                                      "best_row": next((r for r in rows if run_label(r) == best), None), "artifact": ""}
+                                      "best_row": next((r for r in rows if run_label(r) == best), None),
+                                      # build_data.py 複製的預測檔（相對於本 repo）；舊版資料沒有這欄
+                                      "artifact": str(config.UI_ROOT / sg["artifact"]) if sg.get("artifact") else ""}
         g1 = by_sub.get("generation1", {})
         station["generation1"] = {k: num(g1.get(k)) for k in NUMERIC}
         ctl = by_sub.get("control", {})
@@ -197,7 +199,10 @@ def predictions(artifact: str, split: str) -> pd.DataFrame | None:
     """best run 的逐時預測。連續都是 0 的時段只留頭尾兩點，畫出來的線與原始資料一樣，資料量少很多。"""
     if not artifact:
         return None
-    path = Path(artifact) / "predictions" / f"{split}_two_stage_predictions.csv"
+    name = f"{split}_two_stage_predictions.csv"
+    path = Path(artifact) / "predictions" / name
+    if not path.exists():
+        path = Path(artifact) / name                        # 展示資料：data/predictions/<station>/<run>/
     if not path.exists():
         return None
     return _predictions(str(path), path.stat().st_mtime)

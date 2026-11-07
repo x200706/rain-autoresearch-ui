@@ -7,6 +7,8 @@
 以及三種副目標的 convergence.csv 與 results.tsv（皆為訓練期指標）。
 另把每種副目標 best run 的預測圖（訓練集、測試集與測試集局部放大）
 複製到 data/plots/<station>/，這些圖是全部停止後才產生的最終評估。
+逐時預測（訓練集、測試集）也複製到 data/predictions/<station>/<run>/，只留 datetime、actual、pred
+三欄、四捨五入到 0.01 mm，連續都是 0 的時段只留頭尾兩點，讓別台電腦的 Gradio 介面也畫得出預測圖。
 """
 import csv
 import json
@@ -24,6 +26,21 @@ PLOTS = [("訓練集全期", "train_full_prediction.png"), ("測試集全期", "
 
 def num(v):
     return None if v in ("", "NA", None) else float(v)
+
+
+def copy_predictions(src: Path, sid: str, key: str) -> str:
+    """回傳相對於本 repo 的資料夾，介面在裡面找 <split>_two_stage_predictions.csv。"""
+    import pandas as pd
+    sys.path.insert(0, str(DEST.parent))
+    from rainui.results import compress_zero_runs
+    rel = Path("predictions") / sid / key
+    (DEST / rel).mkdir(parents=True, exist_ok=True)
+    for split in ("train", "test"):
+        name = f"{split}_two_stage_predictions.csv"
+        frame = pd.read_csv(src / name, usecols=["datetime", "actual", "pred"], encoding="utf-8-sig")
+        frame[["actual", "pred"]] = frame[["actual", "pred"]].round(2)
+        compress_zero_runs(frame).to_csv(DEST / rel / name, index=False, lineterminator="\n")
+    return "data/" + rel.as_posix()
 
 
 def station(root: Path, sid: str) -> dict:
@@ -68,6 +85,7 @@ def station(root: Path, sid: str) -> dict:
             shutil.copyfile(f, DEST / rel)
             plots.append({"label": label, "src": "data/" + rel.as_posix(), "run": best})
         out["subgoals"][s]["plots"] = plots
+        out["subgoals"][s]["artifact"] = copy_predictions(root.parent / art / "predictions", sid, key)
     # ablation.tsv 沒記 overall_mae：從 control.json 或該副目標 results.tsv 的 best_run 補上
     def run_mae(sub, run):
         g, c = (int(v) for v in run[1:].split("_c"))
