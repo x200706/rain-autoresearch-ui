@@ -25,6 +25,14 @@ SUBGOALS = {
 }
 
 
+# 測站代碼：有人站 6 位數字（466930），自動站英數混合（C0A870）；至少要有一個數字，避免把一般英文字當站號
+STATION_ID = re.compile(r"(?<![0-9A-Za-z])(?=[0-9A-Za-z]*\d)([0-9A-Za-z]{6})(?![0-9A-Za-z])")
+
+
+def is_station_id(text: str) -> bool:
+    return bool(STATION_ID.fullmatch(text))
+
+
 def label(station: str) -> str:
     name = NAMES.get(station, "")
     return f"{station} {name}".strip()
@@ -82,9 +90,9 @@ def station_choices() -> list[tuple[str, str]]:
     out_dir, data_dir = config.outputs_dir(), config.data_dir()
     ids = set()
     if out_dir.exists():
-        ids |= {p.name for p in out_dir.iterdir() if p.is_dir() and re.fullmatch(r"\d{6}", p.name)}
+        ids |= {p.name for p in out_dir.iterdir() if p.is_dir() and is_station_id(p.name)}
     if data_dir.exists():
-        ids |= {p.stem for p in data_dir.glob("*.csv") if re.fullmatch(r"\d{6}", p.stem)}
+        ids |= {p.stem for p in data_dir.glob("*.csv") if is_station_id(p.stem)}
     done, other = [], []
     for sid in sorted(ids):
         if is_complete(sid):
@@ -117,12 +125,12 @@ class CsvCheck:
 
 
 def check_csv(path: str | Path, original_name: str | None = None) -> CsvCheck:
-    """上傳檔案的格式檢查：檔名要有 6 碼站號、要有逐時時間與降水量欄位。"""
+    """上傳檔案的格式檢查：檔名要有 6 碼站號（有人站或自動站）、要有逐時時間與降水量欄位。"""
     name = original_name or Path(path).name
-    found = re.search(r"(\d{6})", name)
-    result = CsvCheck(name=name, station=found.group(1) if found else "")
+    found = STATION_ID.search(Path(name).stem)
+    result = CsvCheck(name=name, station=found.group(1).upper() if found else "")
     if not found:
-        result.errors.append("檔名裡找不到 6 碼站號（例：466930.csv）")
+        result.errors.append("檔名裡找不到 6 碼站號（例：466930.csv、C0A870.csv）")
     try:
         raw = Path(path).read_bytes()
         text = raw.decode("utf-8-sig").lstrip("﻿")

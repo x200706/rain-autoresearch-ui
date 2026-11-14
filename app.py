@@ -14,7 +14,7 @@ ASSETS = Path(__file__).resolve().parent / "assets"
 SPLITS = [("8 : 2", "82"), ("7 : 3", "73")]
 SOURCES = [("已有資料的測站", "existing"), ("上傳新測站 CSV", "upload")]
 SUB_CHOICES = [(f"{s}｜{stations.SUBGOALS[s]['desc']}", s) for s in SUBGOAL_ORDER]
-METRIC_CHOICES = [("MAE（越低越好）", "mae"), ("RMSE（越低越好）", "rmse"), ("低估筆數（越少越好）", "under")]
+METRIC_CHOICES = [("MAE", "mae"), ("RMSE", "rmse"), ("低估筆數", "under")]   # 三種都是越低越好，選項不再加註，免得窄欄被截斷
 PRED_SPLITS = [("訓練集", "train"), ("測試集", "test")]
 # 深淺色只切換 body 的 dark class（所有顏色都是 CSS 變數），不重新載入頁面，看到一半也不會中斷。
 # 選擇記在 localStorage；Gradio 跟著系統深淺色自己改模式時，監看器會改回使用者選的。
@@ -106,6 +106,9 @@ def refresh_left(api_key, *values):
     hit = view.cache_index().get(skill.fingerprint(cfg)) if not skill.blocking(errors) else None
     # 測站已有做到一半的紀錄：按下去是接著做，不是從頭來
     label = "Cache Hit・展示快取結果" if hit else ("繼續實驗" if runner.can_continue(cfg.station, cfg.split) else "開始訓練")
+    blocked = [msg for level, msg in errors.values() if level == "err"]
+    if blocked:             # 欄位下方的紅字容易沒看到，按鈕本身寫出第一個擋住的原因
+        label = f"無法開始：{blocked[0]}" + (f"（另有 {len(blocked) - 1} 項）" if len(blocked) > 1 else "")
     try:
         key_text = skill.goal_key(cfg)
     except (TypeError, ValueError):
@@ -238,7 +241,7 @@ def build() -> gr.Blocks:
                     run_name = gr.Textbox(label="實驗名稱", placeholder="例：竹子湖 第一次自動調參")
                     source = gr.Radio(SOURCES, value="existing", label="資料來源", elem_classes="seg")
                     station = gr.Dropdown(choices, value=default_station, label="測站", filterable=True)
-                    upload = gr.File(label="測站 CSV（檔名含 6 碼站號）", file_types=[".csv"], type="filepath", visible=False)
+                    upload = gr.File(label="測站 CSV（檔名含站號，例：466930、C0A870）", file_types=[".csv"], type="filepath", visible=False)
                     upload_state = gr.State(None)
                     chip = gr.HTML()
                     err_file = gr.Markdown(visible=False, elem_classes="ferr")
@@ -247,7 +250,7 @@ def build() -> gr.Blocks:
                     gr.HTML('<h3 class="lbl">3 · 主目標 <span class="tok">[[MAIN_GOAL]]</span></h3>')
                     with gr.Row(elem_classes="pair"):
                         metric = gr.Dropdown(METRIC_CHOICES, value="mae", label="指標", min_width=0)
-                        thr = gr.Number(value=40, label="實際雨量門檻 ≥ (mm)", minimum=0, min_width=0)
+                        thr = gr.Number(value=40, label="觀測雨量 ≥ (mm)", minimum=0, min_width=0)
                     goal_key = gr.HTML()
                     err_goal = gr.Markdown(visible=False, elem_classes="ferr")
 
@@ -377,7 +380,8 @@ def build() -> gr.Blocks:
         def start_clicked(hit, api, *values):
             cfg, source_error = make_config(*values)
             if skill.blocking(skill.field_errors(cfg, api or "", source_error)):
-                gr.Warning("有欄位格式不對，先修正再開始", duration=4)
+                blocked = [msg for level, msg in skill.field_errors(cfg, api or "", source_error).values() if level == "err"]
+                gr.Warning("還不能開始：" + "；".join(blocked), duration=6)
                 return gr.update()
             if hit:
                 return hit

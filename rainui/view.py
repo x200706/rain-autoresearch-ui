@@ -17,8 +17,9 @@ def stats_html(station: dict, sub: str) -> str:
     beat = s["best_run"] not in ("g01_c1", "–")
     cards = [
         ("最佳 ≥ 40 mm MAE", fmt(s["mae"]), s["best_run"] + ("" if beat else "（未勝過第 1 代）")),
-        ("未經較佳化兩階段分類器對照", fmt(s["g1"].get("mae_ge40mm")),
-         "純 MAE 對照組 " + fmt(s["control"].get("mae_ge40mm"))),
+        # 數字是 ≥ 40 mm MAE，卡片標題要寫出來，不然看不出 18.55 是什麼
+        ("未經較佳化兩階段分類器對照 ≥ 40 mm MAE", fmt(s["g1"].get("mae_ge40mm")),
+         "純 MAE 對照組 ≥ 40 mm MAE " + fmt(s["control"].get("mae_ge40mm"))),
         ("整體 MAE", fmt(s["overall_mae"], 3),
          f"第 1 代 {fmt(s['g1'].get('overall_mae'), 3)}・對照 {fmt(s['control'].get('overall_mae'), 3)}"),
         ("整體 RMSE", fmt(s["overall_rmse"], 3),

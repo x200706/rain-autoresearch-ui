@@ -84,7 +84,7 @@ def test_wording_uses_subgoal_not_gate(rain_root):
     make_station(rain_root, "467590")
     st = app.results.load_station("467590")
     stats = view.stats_html(st, "under")
-    assert "未經較佳化兩階段分類器對照" in stats and "守門" not in stats and "第 1 代 / 純 MAE" not in stats
+    assert "未經較佳化兩階段分類器對照 ≥ 40 mm MAE" in stats and "守門" not in stats and "第 1 代 / 純 MAE" not in stats
     assert all(label.startswith("副目標：") for label, _ in view.sub_tab_choices())
     assert "AE ≥ 20 mm" in view.sub_tab_choices()[0][0]
     assert "守門" not in skill.render(skill.RunConfig(station="467590"))
@@ -140,3 +140,17 @@ def test_delete_asks_first_and_names_the_target(rain_root):
     row, text, pending = ask("st:467590")
     assert row["visible"] and pending == "st:467590" and "467590 恆春" in text and "無法復原" in text
     assert (rain_root / "outputs" / "467590").exists()          # 只顯示確認列，還沒刪
+
+
+def test_automatic_station_file_name_is_accepted(rain_root, tmp_path):
+    """自動站代碼英數混合（C0A870），和有人站一樣可以上傳。"""
+    good = app.on_upload(str(make_csv(tmp_path / "C0A870.csv")))
+    cfg, err = app.make_config(*left(source="upload", upload=good))
+    assert cfg.station == "C0A870" and not err
+    assert not app.stations.check_csv(make_csv(tmp_path / "report.csv")).station
+
+
+def test_start_button_names_what_blocks_it(rain_root):
+    """副目標全部取消勾選時，按鈕本身寫出原因，不只欄位下方的紅字。"""
+    make_station(rain_root, "467590")
+    assert start_label(app.refresh_left("", *left(subs=[]))) == "無法開始：至少勾一種副目標"
