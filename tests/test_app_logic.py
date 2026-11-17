@@ -30,31 +30,31 @@ def test_completed_station_shows_cache_hit_regardless_of_what_is_viewed(rain_roo
     assert start_label(app.refresh_left("", *left(thr=30))) == "開始訓練"
 
 
-def test_bad_upload_blocks_and_switching_source_clears_it(rain_root, tmp_path):
+def test_bad_file_blocks_and_switching_source_clears_it(rain_root, tmp_path):
     make_station(rain_root, "467590")
-    bad = app.on_upload(str(make_csv(tmp_path / "466930.csv", header=("時間", "雨量"))))
-    cfg, err = app.make_config(*left(source="upload", upload=bad))
+    bad = app.file_state(str(make_csv(tmp_path / "466930.csv", header=("時間", "雨量"))))
+    cfg, err = app.make_config(*left(source="codis", upload=bad))
     assert err and skill.blocking(skill.field_errors(cfg, "", err))
-    # 改回「已有資料的測站」：上傳的檔案被清掉，不會偷偷留著，也不會把上傳的站加進選單
-    station_update, upload_update, state, _, _ = app.on_source("existing")
-    assert upload_update["value"] is None and state is None and station_update["visible"]
+    # 改回「已抓取」：抓到的檔案被清掉，不會偷偷留著，也不會把新站加進選單
+    station_update, state, row, btn = app.on_source("existing")
+    assert state is None and station_update["visible"] and not row["visible"] and not btn["visible"]
     cfg, err = app.make_config(*left(source="existing", upload=None))
     assert not err and cfg.station == "467590"
 
 
-def test_upload_mode_never_uses_the_dropdown_station(rain_root, tmp_path):
+def test_codis_mode_never_uses_the_dropdown_station(rain_root, tmp_path):
     make_station(rain_root, "467590")
-    good = app.on_upload(str(make_csv(tmp_path / "466930.csv")))
-    cfg, err = app.make_config(*left(source="upload", upload=good, station="467590"))
+    good = app.file_state(str(make_csv(tmp_path / "466930.csv")))
+    cfg, err = app.make_config(*left(source="codis", upload=good, station="467590"))
     assert cfg.station == "466930" and not err
-    cfg, err = app.make_config(*left(source="upload", upload=None, station="467590"))
-    assert cfg.station == "" and err == "請上傳測站 CSV"
+    cfg, err = app.make_config(*left(source="codis", upload=None, station="467590"))
+    assert cfg.station == "" and err == "請先從 CoDiS 抓取資料"
     assert "466930" not in [sid for _, sid in app.stations.station_choices()]
 
 
-def test_upload_without_heavy_rain_blocks(rain_root, tmp_path):
-    dry = app.on_upload(str(make_csv(tmp_path / "466930.csv", rain=(0, 1, 2))))
-    _, err = app.make_config(*left(source="upload", upload=dry))
+def test_station_without_heavy_rain_blocks(rain_root, tmp_path):
+    dry = app.file_state(str(make_csv(tmp_path / "466930.csv", rain=(0, 1, 2))))
+    _, err = app.make_config(*left(source="codis", upload=dry))
     assert "≥ 40 mm" in err
 
 
@@ -127,7 +127,7 @@ def test_project_path_can_be_changed_and_is_checked(rain_root, tmp_path):
 def test_skill_preview_hides_frontmatter_and_page_has_no_real_mode_label(rain_root):
     make_station(rain_root, "467590")
     out = app.render_view("st:467590", "under", "train", "全部")
-    assert not out[12].startswith("---") and "name: rain-autoresearch" not in out[12]
+    assert not out[13].startswith("---") and "name: rain-autoresearch" not in out[13]
     assert skill.strip_frontmatter(skill.skill_markdown(skill.RunConfig(station="1"))).startswith("# Rain Autoresearch")
     assert "真實模式" not in app.footer_html()
 
@@ -143,9 +143,9 @@ def test_delete_asks_first_and_names_the_target(rain_root):
 
 
 def test_automatic_station_file_name_is_accepted(rain_root, tmp_path):
-    """自動站代碼英數混合（C0A870），和有人站一樣可以上傳。"""
-    good = app.on_upload(str(make_csv(tmp_path / "C0A870.csv")))
-    cfg, err = app.make_config(*left(source="upload", upload=good))
+    """自動站代碼英數混合（C0A870），和有人站一樣可以用。"""
+    good = app.file_state(str(make_csv(tmp_path / "C0A870.csv")))
+    cfg, err = app.make_config(*left(source="codis", upload=good))
     assert cfg.station == "C0A870" and not err
     assert not app.stations.check_csv(make_csv(tmp_path / "report.csv")).station
 
@@ -156,23 +156,71 @@ def test_start_button_names_what_blocks_it(rain_root):
     assert start_label(app.refresh_left("", *left(subs=[]))) == "無法開始：至少勾一種副目標"
 
 
-def test_nchu_source_needs_a_download_and_then_behaves_like_upload(rain_root, tmp_path, monkeypatch):
+def test_codis_source_needs_a_download_first(rain_root, tmp_path, monkeypatch):
     make_station(rain_root, "467590")
-    cfg, err = app.make_config(*left(source="nchu", upload=None, station="467590"))
-    assert cfg.station == "" and err == "請先從中興大學下載資料"
+    cfg, err = app.make_config(*left(source="codis", upload=None, station="467590"))
+    assert cfg.station == "" and err == "請先從 CoDiS 抓取資料"
     csv_path = make_csv(tmp_path / "466910.csv")
-    monkeypatch.setattr(app.sources, "nchu_download", lambda sid: str(csv_path))
+    monkeypatch.setattr(app.sources, "codis_download", lambda sid, progress=None: str(csv_path))
     monkeypatch.setattr(app.sources, "name_of", lambda sid: "鞍部")
-    got = app.on_nchu_download("466910", progress=lambda *a, **k: None)
-    assert got["station"] == "466910" and not got["errors"] and "鞍部" in got["name"]
-    cfg, err = app.make_config(*left(source="nchu", upload=got, station="467590"))
+    got = app.on_codis_download("466910", progress=lambda *a, **k: None)
+    assert got["station"] == "466910" and not got["errors"] and "鞍部" in got["name"] and "CoDiS" in got["name"]
+    cfg, err = app.make_config(*left(source="codis", upload=got, station="467590"))
     assert cfg.station == "466910" and not err
 
 
-def test_nchu_without_data_says_the_station_cannot_be_used(monkeypatch):
-    def fail(sid):
-        raise ValueError(f"中興大學資料庫沒有 {sid} 的資料，這個測站不能用")
-    monkeypatch.setattr(app.sources, "nchu_download", fail)
+def test_codis_without_data_says_the_station_cannot_be_used(monkeypatch):
+    from rainui import codis
+    monkeypatch.setattr(codis, "fetch", lambda *a, **k: codis.pd.DataFrame(columns=["觀測時間(hour)", *codis.COLUMNS]))
     monkeypatch.setattr(app.gr, "Warning", lambda *a, **k: None)
-    got = app.on_nchu_download("C1Z999", progress=lambda *a, **k: None)
-    assert got["errors"] == ["中興大學資料庫沒有 C1Z999 的資料，這個測站不能用"]
+    got = app.on_codis_download("C1Z999", progress=lambda *a, **k: None)
+    assert got["errors"] == ["CoDiS 沒有 C1Z999 的資料，這個測站不能用"]
+
+
+def test_codis_download_fetches_month_by_month(monkeypatch, tmp_path):
+    from rainui import codis, sources
+    monkeypatch.setenv("RAIN_UI_STATE_DIR", str(tmp_path))
+    calls = []
+
+    def fake(station, start, end, kind="", stypes=None):
+        calls.append((start, end))
+        hours = codis.pd.date_range(codis.pd.Timestamp(start).floor("h"), codis.pd.Timestamp(end).floor("h"), freq="h")
+        return codis.pd.DataFrame({"觀測時間(hour)": hours, "降水量(mm)": 0.0})
+    monkeypatch.setattr(codis, "fetch", fake)
+    path = sources.codis_download("466910", end=codis.pd.Timestamp("2009-03-15"))
+    frame = codis.pd.read_csv(path, encoding="utf-8-sig")
+    assert frame["觀測時間(hour)"].iloc[0] == "2009-01-01 00:00:00" and frame["觀測時間(hour)"].iloc[-1] == "2009-03-15 00:00:00"
+    assert frame["觀測時間(hour)"].is_unique and len(frame) == (31 + 28 + 14) * 24 + 1
+
+
+def test_fetch_button_stays_disabled_until_the_station_changes(monkeypatch, tmp_path):
+    csv_path = make_csv(tmp_path / "466910.csv")
+    monkeypatch.setattr(app.sources, "codis_download", lambda sid, progress=None: str(csv_path))
+    monkeypatch.setattr(app.sources, "name_of", lambda sid: "鞍部")
+    assert not app.fetch_button("busy")["interactive"] and "⏳" in app.fetch_button("busy")["value"]
+    state, btn, _ = app.on_codis_fetch("466910", progress=lambda *a, **k: None)
+    assert state["station"] == "466910" and not btn["interactive"]
+    assert app.fetch_button()["interactive"] and app.on_source("codis")[3]["interactive"]
+    state, btn, _ = app.on_codis_fetch("", progress=lambda *a, **k: None)
+    assert state is None and btn["interactive"]
+
+
+def test_prediction_time_is_limited_to_this_year_and_the_latest_published_hour():
+    now = "2026-11-17 21:05"                       # 21:00 的觀測還沒上線，最晚只能預測 21:00
+    day, hours, moved = app.target_choices(now=now)
+    assert day == "2026-11-17" and not moved
+    assert hours[0] == "00:00" and hours[-1] == "21:00" and "22:00" not in hours
+    _, hours, moved = app.target_choices("2026-03-01", now=now)
+    assert hours[0] == "00:00" and hours[-1] == "23:00" and len(hours) == 24 and not moved
+    assert app.target_choices("2025-12-31", now=now)[:3:2] == ("2026-01-01", True)     # 去年 → 今年第一天
+    assert app.target_choices("2026-11-20", now=now)[:3:2] == ("2026-11-17", True)     # 未來 → 最晚那天
+    assert app.latest_target("2026-11-17 21:25") == app.pd.Timestamp("2026-11-17 22:00")
+    day, hours, _ = app.target_choices(now="2026-12-31 23:30")    # 跨日：最晚可預測隔天 00 時
+    assert day == "2027-01-01" and hours == ["00:00"]
+
+
+def test_date_field_limits_and_echoes_the_clamped_day():
+    html = app.date_input_html("2026-11-10", now="2026-11-17 21:05")
+    assert 'min="2026-01-01"' in html and 'max="2026-11-17"' in html and 'value="2026-11-10"' in html
+    box, day, hour = app.on_pred_day("2026-03-01", "23:00")
+    assert day == "2026-03-01" and 'value="2026-03-01"' in box and hour["value"] == "23:00"

@@ -14,20 +14,57 @@ from rainui.stations import SUBGOAL_ORDER
 
 ASSETS = Path(__file__).resolve().parent / "assets"
 SPLITS = [("8 : 2", "82"), ("7 : 3", "73")]
-SOURCES = [("已有資料", "existing"), ("中興大學", "nchu"), ("上傳 CSV", "upload")]
-FILE_SOURCES = ("upload", "nchu")      # 這兩種都是「一個新的 CSV」，之後的檢查與安裝相同
+SOURCES = [("已抓取", "existing"), ("抓取新資料", "codis")]
+FILE_SOURCES = ("codis",)
+FETCH_LABEL = "從 CoDiS 抓取 2009 年至今"      # 「一個新的 CSV」：檢查後在開始實驗時安裝到實驗專案
 MODES = [("訓練與評估", "train"), ("線上預測", "predict")]
 PRED_STATIONS = [(stations.label(sid), sid) for sid in predict.available()]
-PRED_HINT = ("按下預測後，當場抓 T 之前的逐時觀測（較佳化搜尋最長的 24 小時序列再多一天），預測 T 這一小時；不存檔。"
-             "到昨天 24 時的資料來自氣象署 CoDiS（不需授權碼）；今天的整點要用氣象署開放資料，需要授權碼。"
-             "沒有授權碼時最晚只能預測今天 01 時。\n\n"
-             "授權碼：到 [氣象資料開放平臺](https://opendata.cwa.gov.tw/user/authkey) 免費註冊、登入後複製。"
-             "授權碼只用在這次預測，不會存檔。")
+PRED_HINT = "需授權碼方能預測，若無請至[氣象資料開放平臺](https://opendata.cwa.gov.tw/user/authkey)免費註冊。"
 
 
-def default_target() -> str:
-    """預設預測下一個整點。"""
-    return (pd.Timestamp.now().floor("h") + pd.Timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+PUBLISH_DELAY = pd.Timedelta(minutes=20)   # 開放資料整點觀測大約整點後 10–20 分鐘才上線
+
+
+def latest_target(now=None) -> pd.Timestamp:
+    """最晚能預測的整點：最新一筆已上線的整點觀測再加一小時。"""
+    now = pd.Timestamp(now) if now is not None else pd.Timestamp.now()
+    return (now - PUBLISH_DELAY).floor("h") + pd.Timedelta(hours=1)
+
+
+def target_choices(day: str | None = None, now=None):
+    """預測時間只能選今年 1 月 1 日 00 時到最晚能預測的整點。日曆本身已限制可點的日期（HIST_JS），
+    這裡再把手打的日期夾回範圍內；回傳 (日期, 小時選項, 日期是否被改過)。"""
+    last = latest_target(now)
+    first = pd.Timestamp(year=(pd.Timestamp(now) if now is not None else pd.Timestamp.now()).year, month=1, day=1)
+    try:
+        picked = pd.Timestamp(day).normalize() if day else last.normalize()
+    except (TypeError, ValueError):
+        picked = last.normalize()
+    clamped = min(max(picked, first), last.normalize())
+    top = last.hour if clamped == last.normalize() else 23
+    hours = [f"{h:02d}:00" for h in range(top + 1)]
+    return clamped.strftime("%Y-%m-%d"), hours, bool(day) and clamped != picked
+
+
+def date_input_html(day: str, now=None) -> str:
+    """預測日期欄：瀏覽器原生日期欄，可選範圍是今年 1 月 1 日到最晚能預測的那一天。"""
+    last = latest_target(now)
+    first = f"{(pd.Timestamp(now) if now is not None else pd.Timestamp.now()).year}-01-01"
+    return (f'<label class="date-field"><span class="date-label">日期</span>'
+            f'<input type="date" id="pred-date-input" value="{day}" min="{first}" max="{last:%Y-%m-%d}"></label>')
+
+
+def on_pred_day(day, hour):
+    day_, hours, moved = target_choices(day)
+    if moved:
+        gr.Warning(f"只能預測今年到 {latest_target():%Y-%m-%d %H:00} 之間的時間，已改成 {day_}", duration=6)
+    return date_input_html(day_), day_, gr.update(choices=hours, value=hour if hour in hours else hours[-1])
+
+
+def refresh_target():
+    """切到預測模式或重新載入時，依現在時間更新可選的預測時間，預設最晚能預測的整點。"""
+    day, hours, _ = target_choices()
+    return date_input_html(day), day, gr.update(choices=hours, value=hours[-1])
 SUB_CHOICES = [(f"{s}｜{stations.SUBGOALS[s]['desc']}", s) for s in SUBGOAL_ORDER]
 METRIC_CHOICES = [("MAE", "mae"), ("RMSE", "rmse"), ("低估筆數", "under")]   # 三種都是越低越好，選項不再加註，免得窄欄被截斷
 PRED_SPLITS = [("訓練集", "train"), ("測試集", "test")]
@@ -65,6 +102,41 @@ HIST_JS = """
     }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
   }
   window.raApplyTheme(window.raThemeMode());
+  if (!window.__raAccent) {
+    window.__raAccent = true;
+    // 主題色：頂列小方塊，和深淺色一樣記在瀏覽器
+    const markAccent = () => {
+      let accent = 'blue';
+      try { accent = localStorage.getItem('ra-accent') || 'blue'; } catch (e) {}
+      document.documentElement.dataset.accent = accent;
+      document.querySelectorAll('.swatch').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.accent === accent)));
+    };
+    document.addEventListener('click', (event) => {
+      const sw = event.target.closest('.swatch');
+      if (!sw) return;
+      try { localStorage.setItem('ra-accent', sw.dataset.accent); } catch (e) {}
+      markAccent();
+    });
+    markAccent();
+    setTimeout(markAccent, 1500);
+  }
+  if (!window.__raDateField) {
+    window.__raDateField = true;
+    // 預測日期：瀏覽器原生的日期欄（min／max 由 Python 寫進去，範圍外的日子點不了）。
+    // 點欄位任何地方都打開日曆；選好就寫進隱藏欄位，交給 Python。
+    document.addEventListener('click', (event) => {
+      const input = event.target.closest('#pred-date-input');
+      if (input && input.showPicker) { try { input.showPicker(); } catch (e) {} }
+    });
+    document.addEventListener('change', (event) => {
+      if (event.target.id !== 'pred-date-input' || !event.target.value) return;
+      const field = document.querySelector('#pred-day-key textarea, #pred-day-key input');
+      if (!field) return;
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(field), 'value').set;
+      setter.call(field, event.target.value);
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
   if (window.__raHistClick) return;
   window.__raHistClick = true;
   // 右側卡片：把 data-hist 寫進隱藏欄位，再按隱藏按鈕，交給 Python 切換主畫面
@@ -88,7 +160,7 @@ def make_config(model, run_name, source, station, upload, split, metric, thr, su
     source_error = ""
     if source in FILE_SOURCES:
         if not upload:
-            source_error = "請先從中興大學下載資料" if source == "nchu" else "請上傳測站 CSV"
+            source_error = "請先從 CoDiS 抓取資料"
             sid = ""
         else:
             sid = upload["station"]
@@ -145,39 +217,47 @@ def skill_download(cfg: skill.RunConfig) -> str:
     return f'<a class="dl-btn" href="{href}" download="SKILL.md">下載 SKILL.md</a>'
 
 
+def fetch_button(state: str = "ready"):
+    """抓取按鈕：抓取中與抓完都不能再按，換測站（或切換資料來源）才恢復。"""
+    label = {"ready": FETCH_LABEL, "busy": "⏳ 抓取中，約 30 秒…", "done": "已抓取這個測站"}[state]
+    return gr.update(value=label, interactive=state == "ready")
+
+
 def on_source(source):
-    return (gr.update(visible=source == "existing"), gr.update(visible=source == "upload", value=None), None,
-            gr.update(visible=source == "nchu"), gr.update(visible=source == "nchu"))
+    return (gr.update(visible=source == "existing"), None, gr.update(visible=source == "codis"),
+            gr.update(visible=source == "codis", value=FETCH_LABEL, interactive=True))
 
 
-def on_nchu_kind(kind):
+def on_codis_kind(kind):
     choices = sources.stations_of(kind)
     return gr.update(choices=choices, value=choices[0][1] if choices else None)
 
 
-def on_nchu_download(station, progress=gr.Progress()):
-    """抓 2009 年到今天的整段資料；資料量不檢查，只要中興有回傳就能用。"""
+def file_state(path, name: str = "") -> dict:
+    """抓好的 CSV 經過格式檢查後的狀態；之後的檢查與安裝都看這個。"""
+    check = stations.check_csv(path)
+    return {"name": name or check.name, "station": check.station, "rows": check.rows, "rain": check.rain,
+            "errors": check.errors, "path": str(path)}
+
+
+def on_codis_download(station, progress=gr.Progress()):
+    """抓 2009 年到昨天的整段資料；資料量不檢查，只要 CoDiS 有回傳就能用。"""
     if not station:
         gr.Warning("請先選擇測站", duration=4)
         return None
-    progress(0, desc=f"從中興大學下載 {station} 2009 年至今的逐時資料（約需 2–3 分鐘）")
+    progress(0, desc=f"從 CoDiS 抓取 {station} 2009 年至今的逐時資料")
     try:
-        path = sources.nchu_download(station)
+        path = sources.codis_download(station, progress=lambda f: progress(f, desc="逐月抓取中"))
     except ValueError as exc:
         gr.Warning(str(exc), duration=8)
-        return {"name": f"中興大學 {station}", "station": station, "rows": 0, "rain": [], "errors": [str(exc)], "path": ""}
-    check = stations.check_csv(path)
-    name = sources.name_of(station)
-    return {"name": f"中興大學 {station} {name}（2009 年至今）", "station": station, "rows": check.rows,
-            "rain": check.rain, "errors": check.errors, "path": path}
+        return {"name": f"CoDiS {station}", "station": station, "rows": 0, "rain": [], "errors": [str(exc)], "path": ""}
+    return file_state(path, f"CoDiS {station} {sources.name_of(station)}（2009 年至今）")
 
 
-def on_upload(path):
-    if not path:
-        return None
-    check = stations.check_csv(path)
-    return {"name": check.name, "station": check.station, "rows": check.rows, "rain": check.rain,
-            "errors": check.errors, "path": str(path)}
+def on_codis_fetch(station, progress=gr.Progress()):
+    """按鈕的事件：輸出也接到檔案狀態列，讓進度條顯示在那裡；抓完按鈕維持停用。"""
+    state = on_codis_download(station, progress)
+    return state, fetch_button("ready" if state is None else "done"), gr.update()
 
 
 def on_sub_mode(mode):
@@ -204,13 +284,13 @@ def render_view(key, sub, pred_split, gen):
     if not run:
         if station is None:
             return (view.header_html("選一個實驗", "", ""), gr.update(visible=False), "", "", gr.update(visible=False),
-                    *([gr.update()] * 8), gr.update(value="", interactive=False), gr.update(interactive=False))
+                    *([gr.update()] * 9), gr.update(value="", interactive=False), gr.update(interactive=False))
         complete = stations.is_complete(station_id) or not station.get("live")
         head = view.header_html(station["label"], "已完成" if complete else "未完成", f"RAIN_SPLIT {station['split']}",
                                 "ok" if complete else "warn")
         notes, notes_ok = runner.load_station_notes(station_id), True
     if station is None:
-        return (head, gr.update(visible=True), flow, log, gr.update(visible=False), *([gr.update()] * 8),
+        return (head, gr.update(visible=True), flow, log, gr.update(visible=False), *([gr.update()] * 9),
                 gr.update(value=notes, interactive=notes_ok), gr.update(interactive=notes_ok))
     sub = sub if sub in SUBGOAL_ORDER else "under"
     sg = station["subgoals"][sub]
@@ -222,7 +302,7 @@ def render_view(key, sub, pred_split, gen):
     skill_md = skill.strip_frontmatter(Path(run["log"]).with_name("SKILL.md").read_text(encoding="utf-8")) if run \
         else skill.render(skill.default_config(station_id))
     return (head, gr.update(visible=bool(run and log)), flow, log, gr.update(visible=True),
-            view.stats_html(station, sub), charts.convergence(sg["conv"]), charts.predictions(frame, pred_title),
+            view.stats_html(station, sub), view.conv_head_html(station, sub), charts.convergence(sg["conv"]), charts.predictions(frame, pred_title),
             gr.update(choices=gens, value=gen), results.results_table(station, sub, gen),
             station.get("card") or "（沒有測站資訊卡）", station.get("learnings") or "（還沒有學習紀錄）", skill_md,
             gr.update(value=notes, interactive=notes_ok), gr.update(interactive=notes_ok))
@@ -251,17 +331,21 @@ def build() -> gr.Blocks:
     default_station = next((sid for _, sid in choices if sid == "467590"), choices[0][1] if choices else None)
     first_view = f"st:{default_station}" if default_station else next(
         (it["key"] for it in view.history_items()), None)
-    css = (ASSETS / "style.css").read_text(encoding="utf-8")
-    head = '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">'
+    css = (ASSETS / "style.css").read_text(encoding="utf-8") + "\n" + theme.accent_css()
+    # 主題色在頁面畫出來之前就套上，不會先閃一下藍色
+    head = ('<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">'
+            "<script>try{var a=localStorage.getItem('ra-accent');if(a)document.documentElement.dataset.accent=a;}"
+            "catch(e){}</script>")
     with gr.Blocks(theme=theme.build(), css=css, js=HIST_JS, title="Rain Autoresearch", head=head) as demo:
         with gr.Row(elem_id="topbar"):
             gr.HTML('<div class="brand"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
                     'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 15a4 4 0 0 1-.5-8A6 6 0 0 1 18 8a3.5 3.5 0 0 1 0 7"/>'
                     '<path d="M9 18l-1 3"/><path d="M13 18l-1 3"/><path d="M17 18l-1 3"/></svg><h1>Rain Autoresearch</h1>'
-                    '<span class="muted">測站降雨模型自動調參互動原型</span></div>', elem_id="brand")
+                    '</div>', elem_id="brand")
+            gr.HTML(theme.swatches_html(), elem_id="swatchbar")
+            theme_btn = gr.Button("☾ 深色模式", size="sm", elem_id="theme-btn", scale=0, min_width=0)
             gr.HTML('<a class="gh" href="https://github.com/x200706/rain-autoresearch-ui" title="GitHub" '
                     'aria-label="GitHub 原始碼"><i class="fa-brands fa-github"></i></a>', elem_id="ghlink")
-            theme_btn = gr.Button("☾ 深色模式", size="sm", elem_id="theme-btn", scale=0, min_width=0)
 
         with gr.Row(elem_id="layout", equal_height=False):
             # ---------------- left: settings
@@ -283,12 +367,11 @@ def build() -> gr.Blocks:
                         run_name = gr.Textbox(label="實驗名稱", placeholder="例：竹子湖 第一次自動調參")
                         source = gr.Radio(SOURCES, value="existing", label="資料來源", elem_classes="seg")
                         station = gr.Dropdown(choices, value=default_station, label="測站", filterable=True)
-                        with gr.Row(visible=False, elem_classes="pair") as nchu_row:
-                            nchu_kind = gr.Dropdown(sources.KINDS, value="有人站", label="站種", min_width=0)
-                            nchu_station = gr.Dropdown(sources.stations_of("有人站"), label="測站", filterable=True,
-                                                       min_width=0)
-                        nchu_btn = gr.Button("從中興大學下載 2009 年至今", size="sm", visible=False)
-                        upload = gr.File(label="測站 CSV（檔名含站號，例：466930、C0A870）", file_types=[".csv"], type="filepath", visible=False)
+                        with gr.Row(visible=False, elem_classes="pair") as codis_row:
+                            codis_kind = gr.Dropdown(sources.KINDS, value="有人站", label="站種", min_width=0)
+                            codis_station = gr.Dropdown(sources.stations_of("有人站"), label="測站", filterable=True,
+                                                        min_width=0)
+                        codis_btn = gr.Button(FETCH_LABEL, size="sm", visible=False)
                         upload_state = gr.State(None)
                         chip = gr.HTML()
                         err_file = gr.Markdown(visible=False, elem_classes="ferr")
@@ -329,13 +412,19 @@ def build() -> gr.Blocks:
                                     shell = gr.Code(language="shell", interactive=False, show_label=False)
                             download = gr.HTML(elem_id="dl")
                     with gr.Column(min_width=0, visible=False, elem_id="pred-left") as pred_left:
-                        gr.HTML('<h3 class="lbl">線上預測 · 當場向氣象署抓觀測</h3>')
+                        gr.HTML('<h3 class="lbl">線上預測</h3>')
                         cwa_key = gr.Textbox(label="氣象署開放資料授權碼", type="password",
                                              placeholder="CWA-XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX")
                         pred_station = gr.Dropdown(PRED_STATIONS, value=PRED_STATIONS[0][1] if PRED_STATIONS else None,
-                                                   label="測站（已打包最佳兩階段模型）")
-                        pred_time = gr.DateTime(value=default_target(), include_time=True, type="string",
-                                                label="要預測的時間（取整點）")
+                                                   label="已訓練完畢之測站")
+                        _day, _hours, _ = target_choices()
+                        with gr.Column(elem_id="pred-when"):
+                            gr.HTML('<div class="when-title">要預測的時間點</div>')
+                            with gr.Row(elem_classes="when-row"):
+                                with gr.Column(min_width=0):
+                                    pred_day_box = gr.HTML(date_input_html(_day), elem_id="pred-day")
+                                    pred_day = gr.Textbox(_day, elem_id="pred-day-key", show_label=False, container=False)
+                                pred_hour = gr.Dropdown(_hours, value=_hours[-1], label="時間點", min_width=0)
                         gr.Markdown(PRED_HINT, elem_classes="hint")
 
                 with gr.Column(elem_id="startbar"):
@@ -362,8 +451,8 @@ def build() -> gr.Blocks:
                     sub_tabs = gr.Radio(view.sub_tab_choices(), value="under", show_label=False, elem_classes="subtabs")
                     stats_box = gr.HTML()
                     with gr.Group(elem_classes="card"):
-                        gr.HTML('<div class="card-h"><h3>收斂圖</h3><span class="muted">訓練期 ≥ 40 mm MAE（mm）</span></div>')
-                        conv_plot = gr.Plot(show_label=False, elem_classes="static-plot")
+                        conv_head = gr.HTML(view.conv_head_html())
+                        conv_plot = gr.Plot(show_label=False, elem_classes="static-plot", elem_id="conv-plot")
                     with gr.Group(elem_classes="card"):
                         gr.HTML('<div class="card-h"><h3>預測效果</h3><span class="muted">各副目標最佳基因的逐時預測</span></div>')
                         pred_split = gr.Radio(PRED_SPLITS, value="train", show_label=False, elem_classes="subtabs pad")
@@ -387,16 +476,16 @@ def build() -> gr.Blocks:
                     save_notes = gr.Button("儲存備註", size="sm")
 
                 with gr.Column(visible=False, elem_id="forecast", min_width=0) as pred_group:
-                    pred_head = gr.HTML(view.header_html("線上預測", "", "選好測站與時間後按「預測這一小時」"))
+                    pred_head = gr.HTML(view.header_html("預測結果", "", "選好測站與時間後按「預測這一小時」"))
                     pred_stats = gr.HTML()
                     with gr.Group(elem_classes="card"):
-                        gr.HTML('<div class="card-h"><h3>預測與觀測</h3><span class="muted">目標小時與前 23 小時；'
-                                '每一點都只用該小時之前的觀測</span></div>')
+                        gr.HTML('<div class="card-h"><h3>預測與觀測</h3></div>')
                         pred_chart = gr.Plot(show_label=False)
                     with gr.Group(elem_classes="card"):
-                        gr.HTML('<div class="card-h"><h3>模型與資料來源</h3></div>')
+                        gr.HTML('<div class="card-h"><h3>模型詳情</h3></div>')
                         pred_model = gr.Markdown(view.forecast_model_md(predict.load_spec(PRED_STATIONS[0][1]))
                                                  if PRED_STATIONS else "沒有打包好的模型（deploy/）", elem_classes="md")
+                        gr.HTML('<div class="card-h sub"><h3>模型輸入狀況</h3></div>')
                         pred_cov = gr.Dataframe(headers=["欄位", "用途", "這段時間"], interactive=False, wrap=True,
                                                 elem_classes="df")
 
@@ -421,17 +510,17 @@ def build() -> gr.Blocks:
             if comp is upload_state:
                 continue
             comp.change(refresh_left, left_inputs, left_outputs, show_progress="hidden")
-        source.change(on_source, source, [station, upload, upload_state, nchu_row, nchu_btn]).then(
+        source.change(on_source, source, [station, upload_state, codis_row, codis_btn]).then(
             refresh_left, left_inputs, left_outputs, show_progress="hidden")
-        nchu_kind.change(on_nchu_kind, nchu_kind, nchu_station)
-        nchu_station.change(lambda: None, None, upload_state).then(refresh_left, left_inputs, left_outputs,
-                                                                    show_progress="hidden")
-        nchu_btn.click(on_nchu_download, nchu_station, upload_state).then(
+        codis_kind.change(on_codis_kind, codis_kind, codis_station)
+        codis_station.change(lambda: (None, fetch_button()), None, [upload_state, codis_btn]).then(
             refresh_left, left_inputs, left_outputs, show_progress="hidden")
-        upload.change(on_upload, upload, upload_state).then(refresh_left, left_inputs, left_outputs, show_progress="hidden")
+        codis_btn.click(lambda: fetch_button("busy"), None, codis_btn, queue=False).then(
+            on_codis_fetch, codis_station, [upload_state, codis_btn, chip]).then(
+            refresh_left, left_inputs, left_outputs, show_progress="hidden")
         sub_mode.change(on_sub_mode, sub_mode, [subs, sub_text])
 
-        view_outputs = [head, log_group, flow, log, result_group, stats_box, conv_plot, pred_plot, gen, table, card_md,
+        view_outputs = [head, log_group, flow, log, result_group, stats_box, conv_head, conv_plot, pred_plot, gen, table, card_md,
                         learn_md, skill_md, notes, save_notes]
 
         def show(key, sub, psplit, g, query=""):
@@ -547,11 +636,11 @@ def build() -> gr.Blocks:
             known = {sid for _, sid in stations.station_choices()}
             gr.Info("已把設定載入左側", duration=4)
             return ("existing", gr.update(value=cfg.station if cfg.station in known else None, visible=True),
-                    gr.update(value=None, visible=False), None, cfg.split, cfg.metric, cfg.threshold, cfg.sub_mode,
+                    None, gr.update(visible=False), gr.update(visible=False), cfg.split, cfg.metric, cfg.threshold, cfg.sub_mode,
                     cfg.subgoals, cfg.sub_text, cfg.max_gen, cfg.patience, cfg.children, cfg.parallel, cfg.template,
                     cfg.run_name if run else "")
         load_cfg.click(load_settings, view_key,
-                       [source, station, upload, upload_state, split, metric, thr, sub_mode, subs, sub_text, max_gen,
+                       [source, station, upload_state, codis_row, codis_btn, split, metric, thr, sub_mode, subs, sub_text, max_gen,
                         patience, children, parallel, template, run_name]).then(
             refresh_left, left_inputs, left_outputs, show_progress="hidden")
 
@@ -577,9 +666,16 @@ def build() -> gr.Blocks:
                     ).then(lambda m, k, s, p, q: show(k, s, p, "全部", q) if m == "train" else (gr.skip(),) * len(full_outputs),
                            [mode, view_key, sub_tabs, pred_split, hist_q], full_outputs)
 
-        def run_forecast(key, sid, when):
-            if not sid or not when:
+        def run_forecast(key, sid, day, hour):
+            if not (key or "").strip():
+                gr.Warning("請先輸入氣象署開放資料授權碼", duration=6)
+                return (gr.skip(),) * 5
+            if not sid or not day or not hour:
                 gr.Warning("請選擇測站與時間", duration=4)
+                return (gr.skip(),) * 5
+            when = pd.Timestamp(f"{pd.Timestamp(day):%Y-%m-%d} {hour}")
+            if when > latest_target():              # 頁面開著放久了，選項可能已經過時
+                gr.Warning(f"目前最晚只能預測 {latest_target():%Y-%m-%d %H:00}", duration=6)
                 return (gr.skip(),) * 5
             spec = predict.load_spec(sid)
             try:
@@ -587,17 +683,18 @@ def build() -> gr.Blocks:
             except predict.ForecastError as exc:
                 gr.Warning(str(exc), duration=8)
                 return (view.header_html("無法預測", "", str(exc), "err"), "", gr.update(), view.forecast_model_md(spec), None)
-            src = f"CoDiS 到 {info['codis_last']:%m-%d %H:%M}"
-            if info["realtime_hours"]:
-                src += f"・開放資料到 {info['last_observed']:%m-%d %H:%M}"
-            head = view.header_html(f"{stations.label(sid)}・{info['target']:%Y-%m-%d %H:00}", "已預測", src, "ok")
+            head = view.header_html(f"預測結果・{stations.label(sid)}・{info['target']:%Y-%m-%d %H:00}", "", "")
             return (head, view.forecast_html(info, spec), charts.forecast(frame, info["target"]),
                     view.forecast_model_md(spec), view.coverage_rows(info, spec))
-        pred_btn.click(run_forecast, [cwa_key, pred_station, pred_time],
+        pred_btn.click(run_forecast, [cwa_key, pred_station, pred_day, pred_hour],
                        [pred_head, pred_stats, pred_chart, pred_model, pred_cov])
         pred_station.change(lambda sid: view.forecast_model_md(predict.load_spec(sid)) if sid else "", pred_station,
                             pred_model)
 
+        pred_day.input(on_pred_day, [pred_day, pred_hour], [pred_day_box, pred_day, pred_hour])
+        mode.change(lambda m: refresh_target() if m == "predict" else (gr.skip(),) * 3, mode,
+                    [pred_day_box, pred_day, pred_hour])
+        demo.load(refresh_target, None, [pred_day_box, pred_day, pred_hour])
         demo.load(refresh_left, left_inputs, left_outputs)
         demo.load(**after)
     return demo

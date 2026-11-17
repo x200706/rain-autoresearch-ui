@@ -1,6 +1,6 @@
 """氣象署 CoDiS（codis.cwa.gov.tw）逐時觀測：不需要金鑰，資料大約更新到前一天 24 時。
 
-一次 POST 取回一段期間所有觀測項目，轉成中興大學資料庫（與訓練資料）相同的欄位名稱，
+一次 POST 取回一段期間所有觀測項目，轉成訓練資料（原本取自中興大學資料庫）相同的欄位名稱，
 CoDiS 的 23:59 就是隔天 00:00。對照取自先前補資料用的 station_rainfall_pipeline.ipynb。
 """
 import pandas as pd
@@ -9,7 +9,7 @@ import urllib3
 
 URL = "https://codis.cwa.gov.tw/api/station?"
 TIMEOUT = 30
-# 中興／訓練資料欄位 ← (CoDiS 群組, 數值鍵)
+# 訓練資料欄位 ← (CoDiS 群組, 數值鍵)
 COLUMNS = {
     "測站氣壓(hPa)": ("StationPressure", "Instantaneous"),
     "海平面氣壓(hPa)": ("SeaLevelPressure", "Instantaneous"),
@@ -49,7 +49,8 @@ def station_types(station: str, kind: str = "") -> list[str]:
     return ["agr", "auto_C0", "auto_C1"]
 
 
-def fetch(station: str, start: pd.Timestamp, end: pd.Timestamp, kind: str = "") -> pd.DataFrame:
+def fetch(station: str, start: pd.Timestamp, end: pd.Timestamp, kind: str = "",
+          stypes: list[str] | None = None) -> pd.DataFrame:
     """start～end（含）的逐時觀測。沒有資料回傳空表；連線錯誤直接丟出。"""
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     start, end = pd.Timestamp(start).floor("h"), pd.Timestamp(end).floor("h")
@@ -58,7 +59,7 @@ def fetch(station: str, start: pd.Timestamp, end: pd.Timestamp, kind: str = "") 
     payload = {"date": f"{end:%Y-%m-%d}T00:00:00.000+08:00", "type": "report_date", "stn_ID": station,
                "more": "", "item": "", "start": f"{first:%Y-%m-%dT%H}:00:00",
                "end": f"{end:%Y-%m-%dT%H}:00:00" if end.hour else f"{end - pd.Timedelta(minutes=1):%Y-%m-%dT%H:%M}:00"}
-    for stype in station_types(station, kind):
+    for stype in stypes or station_types(station, kind):
         resp = requests.post(URL, data={**payload, "stn_type": stype}, verify=False, timeout=TIMEOUT)
         resp.raise_for_status()
         data = resp.json().get("data") or []

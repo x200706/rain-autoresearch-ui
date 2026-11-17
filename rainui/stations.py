@@ -1,4 +1,4 @@
-"""測站名稱、可選測站清單與上傳 CSV 的檢查。"""
+"""測站名稱、可選測站清單與抓取 CSV 的檢查。"""
 import io
 import json
 import re

@@ -216,7 +216,7 @@ def field_errors(cfg: RunConfig, api_key: str, source_error: str = "") -> dict:
     if source_error:
         errors["file"] = ("err", source_error)
     elif not cfg.station:
-        errors["file"] = ("err", "請選擇測站或上傳 CSV")
+        errors["file"] = ("err", "請選擇測站或從 CoDiS 抓取資料")
     if cfg.sub_mode == "preset" and not cfg.subgoals:
         errors["sub"] = ("err", "至少勾一種副目標")
     elif cfg.sub_mode == "semantic" and not cfg.sub_text.strip():

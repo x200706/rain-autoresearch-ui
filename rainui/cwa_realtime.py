@@ -179,7 +179,7 @@ def fetch(key: str, station: str, start, end) -> tuple[pd.DataFrame, list[str]]:
         if "授權碼" in str(exc):
             raise
         rows = []
-        notes.append(f"拿不到今天稍早的整點快照（{exc}），只用最新一筆")
+        notes.append(f"拿不到今日稍早的整點快照（{exc}），只用最新一筆")
     rows += latest(key, station)
     if not rows:
         raise RealtimeError(f"氣象署開放資料沒有測站 {station} 在 {start:%m-%d %H:%M} 之後的觀測")

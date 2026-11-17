@@ -258,27 +258,28 @@ def predict_frame(df: pd.DataFrame, spec: dict, targets) -> pd.DataFrame:
     return out
 
 
-MAX_SEARCH_TIME_STEP = 24   # genome.py 的 TIME_STEP 候選最大值；換成搜尋空間內任何模型都抓得夠
+IMPUTE_BUFFER_HOURS = 12   # 序列前多抓的小時：序列開頭缺測時才有前面的觀測可以插值，不必沿用訓練資料最後一筆
 
 
 def lookback_hours(spec: dict) -> int:
-    """預測一小時要往前抓多少小時：較佳化搜尋的最大序列長度、這個模型的序列長度與 gate lag 取大者，再多留一天給補值。"""
-    return max(MAX_SEARCH_TIME_STEP, spec["time_step"], LAG_HOURS + 1) + 24
+    """預測一小時要往前抓多少小時：這個模型的序列長度（gate 的 lag 也在裡面）再多 12 小時給補值。"""
+    return max(spec["time_step"], LAG_HOURS + 1) + IMPUTE_BUFFER_HOURS
 
 
 class ForecastError(Exception):
     """抓不到資料或時間超出可預測範圍；訊息直接顯示給使用者。"""
 
 
-def forecast(station: str, target, context: int = 24, key: str = "") -> tuple[pd.DataFrame, dict]:
-    """預測 target 這一小時（只用 target 之前的觀測），並附上前 context−1 小時的預測當對照。
-    資料當場抓、不存檔：CoDiS 到前一天 24 時；有氣象署開放資料授權碼時，今天的整點由開放資料補上。
-    回傳 (逐時預測, 摘要)。"""
+def forecast(station: str, target, key: str = "") -> tuple[pd.DataFrame, dict]:
+    """預測 target 這一小時（只用 target 之前的觀測）。
+    資料當場抓、不存檔：CoDiS 到前一天 24 時，今天的整點由氣象署開放資料補上（一定要授權碼）。
+    回傳 (畫圖用的逐時資料：序列各小時的觀測與 target 的預測, 摘要)。"""
     from . import codis, cwa_realtime
+    if not key.strip():
+        raise ForecastError("請先輸入氣象署開放資料授權碼")
     spec = load_spec(station)
     target = pd.Timestamp(target).floor("h")
-    first_target = target - pd.Timedelta(hours=context - 1)
-    start = first_target - pd.Timedelta(hours=lookback_hours(spec))
+    start = target - pd.Timedelta(hours=lookback_hours(spec))
     try:
         raw = codis.fetch(station, start, target)
     except Exception as exc:  # noqa: BLE001 — 連線問題直接告訴使用者
@@ -289,10 +290,6 @@ def forecast(station: str, target, context: int = 24, key: str = "") -> tuple[pd
     codis_last = pd.Timestamp(observed["觀測時間(hour)"].max())
     last, realtime_hours, notes = codis_last, 0, []
     if target - pd.Timedelta(hours=1) > codis_last:
-        if not key.strip():
-            raise ForecastError(f"CoDiS 目前只到 {codis_last:%Y-%m-%d %H:%M}，最晚能預測 "
-                                f"{codis_last + pd.Timedelta(hours=1):%Y-%m-%d %H:%M}；要預測更晚的時間，"
-                                "請在上方輸入氣象署開放資料授權碼")
         try:
             rt, notes = cwa_realtime.fetch(key.strip(), station, codis_last, target)
         except cwa_realtime.RealtimeError as exc:
@@ -308,7 +305,7 @@ def forecast(station: str, target, context: int = 24, key: str = "") -> tuple[pd
     if pd.Timestamp(raw["觀測時間(hour)"].max()) < target:      # 目標還沒有觀測：補一列空白，只當時間軸
         raw = pd.concat([raw, pd.DataFrame({"觀測時間(hour)": [target]})], ignore_index=True)
     df, _ = build_features(raw, spec)
-    frame = predict_frame(df, spec, pd.date_range(first_target, target, freq="h"))
+    frame = predict_frame(df, spec, pd.date_range(target, target, freq="h"))
     before = raw[pd.to_datetime(raw["觀測時間(hour)"]) < target]
     sources = {}
     for col in raw.columns:
@@ -322,4 +319,9 @@ def forecast(station: str, target, context: int = 24, key: str = "") -> tuple[pd
             "lstm_available": bool(row["lstm_sequence_available"]), "fetched_from": start, "last_observed": last,
             "codis_last": codis_last, "realtime_hours": realtime_hours, "notes": notes,
             "hours_fetched": int(len(before)), "time_step": spec["time_step"], "column_coverage": sources}
-    return frame, info
+    window = pd.date_range(target - pd.Timedelta(hours=spec["time_step"]), target, freq="h")
+    chart = pd.DataFrame({"datetime": window,
+                          "actual": df.set_index("datetime")["PP01_raw"].reindex(window).to_numpy(dtype=float)})
+    chart["pred"] = np.nan
+    chart.loc[chart.index[-1], "pred"] = info["pred"]
+    return chart, info

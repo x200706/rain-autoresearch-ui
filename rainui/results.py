@@ -137,6 +137,16 @@ def stats(station: dict, sub: str) -> dict:
     }
 
 
+def pod_far(frame: pd.DataFrame | None, thr: float) -> dict | None:
+    """逐時預測 ≥ thr 的命中率（POD）與誤報率（FAR）；沒有預測檔時回傳 None。"""
+    if frame is None:
+        return None
+    obs, fc = frame["actual"] >= thr, frame["pred"] >= thr
+    hits = int((obs & fc).sum())
+    return {"threshold": thr, "observed": int(obs.sum()), "forecast": int(fc.sum()), "hits": hits,
+            "pod": hits / obs.sum() if obs.sum() else None, "far": 1 - hits / fc.sum() if fc.sum() else None}
+
+
 def results_table(station: dict, sub: str, generation: str = "全部") -> pd.DataFrame:
     sg = station["subgoals"][sub]
     best = sg["best_run"]

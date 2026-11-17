@@ -26,11 +26,19 @@ code, .mono { font-family: var(--font-mono); }
 #topbar > #brand { flex: 1 1 auto !important; }
 #topbar .block { background: transparent !important; border: 0 !important; padding: 0 !important; box-shadow: none !important; }
 #theme-btn { white-space: nowrap; }
-.brand { display: flex; align-items: center; gap: 12px; color: var(--ra-accent); flex-wrap: wrap; }
-.brand h1 { margin: 0; font-size: var(--text-lg); font-weight: 600; color: var(--body-text-color); }
-.brand .muted { font-size: var(--text-sm); }
+/* logo 與標題：本文顏色帶一點主題色的色相（換主題色會跟著變） */
+.brand { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  color: color-mix(in srgb, var(--ra-accent) 40%, var(--body-text-color)); }
+.brand h1 { margin: 0; font-size: var(--text-lg); font-weight: 600; color: inherit; }
 a.gh { display: flex; font-size: 26px; color: var(--body-text-color-subdued); text-decoration: none; }
 a.gh:hover { color: var(--body-text-color); }
+#swatchbar { background: transparent !important; border: 0 !important; padding: 0 !important; }
+.swatches { display: flex; gap: 6px; align-items: center; }
+/* 八個方塊一樣大：選中與滑過都只改框線（畫在方塊裡面），不放大、不加外框 */
+.swatch { flex: 0 0 18px; width: 18px; height: 18px; min-width: 0; min-height: 0; padding: 0; margin: 0; line-height: 0;
+  box-sizing: border-box; border-radius: 4px; border: 2px solid transparent; background: var(--sw); cursor: pointer; }
+.swatch:hover { border-color: color-mix(in srgb, var(--body-text-color) 45%, transparent); }
+.swatch[aria-pressed="true"] { border-color: var(--body-text-color); }
 
 /* ---------- 三欄版面：寬螢幕 左｜主｜歷代；中寬 歷代改成主畫面上方的一列；窄螢幕全部直排 ---------- */
 /* 三欄各自捲動（像 IDE），開始按鈕永遠在左欄底部看得到 */
@@ -62,7 +70,6 @@ a.gh:hover { color: var(--body-text-color); }
   #left { border-right: 0; overflow: visible !important; }
   #left-scroll { overflow-y: visible !important; }
   #main { padding: 16px; }
-  #topbar .brand .muted { display: none; }
 }
 
 /* ---------- 左欄 ---------- */
@@ -84,7 +91,7 @@ h3.lbl .tok { letter-spacing: 0; }
 .seg label { margin: 0 !important; border-radius: 0 !important; justify-content: center; flex: 1 1 0; }
 .seg label:first-child { border-radius: 4px 0 0 4px !important; } .seg label:last-child { border-radius: 0 4px 4px 0 !important; }
 .seg input[type=radio] { display: none; }
-.seg label.selected { background: var(--button-primary-background-fill) !important; color: #fff !important; font-weight: 600; }
+.seg label.selected { background: var(--button-primary-background-fill) !important; color: var(--button-primary-text-color) !important; font-weight: 600; }
 .seg.mini label { padding: 4px 12px !important; font-size: var(--text-sm); }
 .subs .wrap { flex-direction: column; gap: 6px !important; }
 .subs label { width: 100%; font-size: var(--text-sm); }
@@ -119,6 +126,9 @@ h3.lbl .tok { letter-spacing: 0; }
 .card-h { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 16px;
   border-bottom: 1px solid var(--border-color-primary); background: var(--block-background-fill); }
 .card-h h3 { margin: 0; font-size: var(--text-md); font-weight: 600; }
+.conv-meta { margin-left: auto; }
+.card-h.sub { border-top: 1px solid var(--border-color-primary); }
+.card-h.sub h3 { font-size: var(--text-sm); }
 .card-h > .html-container, .card-h .prose { display: flex; align-items: center; gap: 12px; }
 .df table { font-family: var(--font-mono); font-size: var(--text-sm); }
 .df th, .df th * { white-space: nowrap !important; }
@@ -188,7 +198,7 @@ h3.lbl .tok { letter-spacing: 0; }
 .fl-done { opacity: .75; } .fl-done .fl-num { background: var(--ra-ok); border-color: var(--ra-ok); color: #fff; }
 .fl-todo { opacity: .45; }
 .fl-now { border-color: var(--ra-accent); box-shadow: 0 0 0 3px var(--ra-token-bg); animation: fl-pulse 1.6s ease-in-out infinite; }
-.fl-now .fl-num { background: var(--ra-accent); border-color: var(--ra-accent); color: #fff; }
+.fl-now .fl-num { background: var(--ra-accent); border-color: var(--ra-accent); color: var(--ra-on-accent, #fff); }
 .fl-loop { flex: 2.2 1 0; }
 .fl-ring { position: relative; width: 100%; display: flex; align-items: center; justify-content: center; min-height: 76px; }
 .fl-ring svg { position: absolute; width: 76px; height: 76px; }
@@ -197,7 +207,7 @@ h3.lbl .tok { letter-spacing: 0; }
 .fl-steps { position: relative; display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
 .fl-step { padding: 3px 8px; border-radius: 12px; font-size: var(--text-xs); border: 1px solid var(--border-color-primary);
   background: var(--block-background-fill); }
-.fl-step-now { background: var(--ra-accent); color: #fff; border-color: var(--ra-accent); }
+.fl-step-now { background: var(--ra-accent); color: var(--ra-on-accent, #fff); border-color: var(--ra-accent); }
 .fl-chips { display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; }
 .fl-chip { font-size: var(--text-xxs); padding: 1px 6px; border-radius: 8px; border: 1px solid var(--border-color-primary);
   color: var(--body-text-color-subdued); }
@@ -210,7 +220,7 @@ h3.lbl .tok { letter-spacing: 0; }
 @media (prefers-reduced-motion: reduce) { .fl-now, .fl-now .fl-ring circle { animation: none; } }
 
 /* ---------- 歷代實驗：標籤卡片 ---------- */
-#hist-key, #hist-go { display: none !important; }
+#hist-key, #hist-go, #pred-day-key { display: none !important; }
 .hist-list { display: flex; flex-direction: column; gap: 8px; }
 .hist-card { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%; padding: 10px 12px;
   border-radius: 8px; border: 1px solid var(--border-color-primary); background: var(--block-background-fill);
@@ -256,4 +266,27 @@ h3.lbl .tok { letter-spacing: 0; }
     grid-template-areas: "left" "main" !important; }
 }
 #left .hint p { font-size: var(--text-sm); color: var(--body-text-color-subdued); line-height: 1.6; }
+.stat-pred .stat-k, .stat-pred .stat-v { color: #EF4444; }
 .stat-v.stat-v-sm { font-size: var(--text-xl); white-space: nowrap; }
+
+/* 要預測的時間點：一張卡片，標題＋日期／時間點兩欄；日期欄用和下拉選單相同的輸入框變數，兩欄看起來一樣 */
+#pred-when { background: var(--block-background-fill); border: 1px solid var(--block-border-color);
+  border-radius: var(--block-radius); padding: 10px 12px; gap: 8px !important; }
+#pred-when .block, #pred-when .form, #pred-when .html-container { background: transparent !important; border: 0 !important;
+  padding: 0 !important; box-shadow: none !important; }
+#pred-when .when-title { font-size: var(--text-md); font-weight: 600; color: var(--body-text-color); }
+#pred-when .when-row { gap: 12px !important; }
+.date-field { display: flex; flex-direction: column; gap: 0; }
+.date-label { font-size: var(--text-md); color: var(--block-title-text-color); margin-bottom: 8px; line-height: 1.4; }
+#pred-date-input { width: 100%; height: 42px; box-sizing: border-box; padding: 6px 12px; font: inherit; font-size: var(--text-md);
+  color: var(--body-text-color); background: var(--input-background-fill);
+  border: var(--input-border-width) solid var(--input-border-color); border-radius: var(--input-radius);
+  cursor: pointer; color-scheme: light; }
+.dark #pred-date-input { color-scheme: dark; }
+#pred-date-input:focus { outline: none; box-shadow: 0 0 0 1px var(--input-border-color-focus); }
+
+/* 收斂圖的「目前最佳」線跟著主題色（Plotly 寫死的顏色用 !important 蓋掉；預測圖維持資料原本的顏色） */
+#conv-plot .scatterlayer .trace:first-child path.js-line { stroke: var(--ra-accent) !important; }
+#conv-plot .scatterlayer .trace:first-child path.point { fill: var(--ra-accent) !important; stroke: var(--ra-accent) !important; }
+#conv-plot .legend .traces:first-child path.js-line { stroke: var(--ra-accent) !important; }
+#conv-plot .legend .traces:first-child .legendpoints path { fill: var(--ra-accent) !important; stroke: var(--ra-accent) !important; }

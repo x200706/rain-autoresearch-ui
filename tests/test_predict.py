@@ -27,14 +27,18 @@ def test_clean_follows_training_rules():
     assert df["PP02"].tolist()[:2] == [0.0, 1.0]           # 降水時數二值化，缺值依雨量補
 
 
-def test_forecast_refuses_a_time_later_than_codis_has(monkeypatch):
+def test_forecast_refuses_a_time_later_than_the_latest_observation(monkeypatch):
+    from rainui import cwa_realtime
     times = pd.date_range("2026-11-15 00:00", "2026-11-17 00:00", freq="h")
     monkeypatch.setattr(codis, "fetch", lambda *a, **k: pd.DataFrame({"觀測時間(hour)": times, "降水量(mm)": 0.0}))
+    rt = pd.DataFrame({"觀測時間(hour)": pd.date_range("2026-11-17 01:00", "2026-11-17 02:00", freq="h"),
+                       "降水量(mm)": 0.0})
+    monkeypatch.setattr(cwa_realtime, "fetch", lambda *a, **k: (rt, []))
     if not predict.available():
         pytest.skip("deploy/ 沒有模型")
     sid = predict.available()[0]
-    with pytest.raises(predict.ForecastError, match="最晚能預測 2026-11-17 01:00"):
-        predict.forecast(sid, "2026-11-17 05:00")
+    with pytest.raises(predict.ForecastError, match="最晚能預測 2026-11-17 03:00"):
+        predict.forecast(sid, "2026-11-17 05:00", key="k")
 
 
 def test_station_table_groups_by_kind():
@@ -70,7 +74,7 @@ def test_realtime_hourly_rain_from_daily_total_and_dew_point(monkeypatch):
     assert frame.loc[1, "最大陣風風向(360degree)"] == 170 and not notes
 
 
-def test_forecast_needs_a_key_for_today_and_merges_realtime_with_it(monkeypatch):
+def test_forecast_always_needs_a_key_and_merges_realtime_with_it(monkeypatch):
     from rainui import cwa_realtime
     if not predict.available():
         pytest.skip("deploy/ 沒有模型")
@@ -78,8 +82,8 @@ def test_forecast_needs_a_key_for_today_and_merges_realtime_with_it(monkeypatch)
     times = pd.date_range("2026-11-14 00:00", "2026-11-17 00:00", freq="h")
     monkeypatch.setattr(codis, "fetch", lambda *a, **k: pd.DataFrame({"觀測時間(hour)": times, "降水量(mm)": 0.0,
                                                                         "氣溫(℃)": 15.0}))
-    with pytest.raises(predict.ForecastError, match="請在上方輸入氣象署開放資料授權碼"):
-        predict.forecast(sid, "2026-11-17 19:00")
+    with pytest.raises(predict.ForecastError, match="請先輸入氣象署開放資料授權碼"):
+        predict.forecast(sid, "2026-11-10 19:00")
     today = pd.date_range("2026-11-17 00:00", "2026-11-17 18:00", freq="h")
     rt = pd.DataFrame({"觀測時間(hour)": today, "降水量(mm)": 0.0, "氣溫(℃)": 16.0})
     monkeypatch.setattr(cwa_realtime, "fetch", lambda *a, **k: (rt, []))

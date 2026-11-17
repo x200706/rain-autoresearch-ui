@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 ACCENT = "#4D8EF7"
 ACTUAL = "#3B82F6"
 PRED = "#EF4444"
+PRED_SOFT = "#F50057"   # 訓練頁預測圖的預測線：濃桃紅（像警報燈），和正紅有區隔
 MUTED = "#8592A6"
 GRID = "rgba(133,146,166,0.22)"
 
@@ -53,22 +54,34 @@ def predictions(frame: pd.DataFrame | None, title: str) -> go.Figure:
     fig.add_trace(go.Scattergl(x=x, y=frame["actual"].round(2).tolist(), name="觀測雨量", mode="lines",
                                line=dict(color=ACTUAL, width=1)))
     fig.add_trace(go.Scattergl(x=x, y=frame["pred"].round(2).tolist(), name="預測雨量（雙分類器＋有雨 LSTM）",
-                               mode="lines", line=dict(color=PRED, width=1)))
+                               mode="lines", line=dict(color=PRED_SOFT, width=1)))
     fig = _layout(fig, 420, "逐時雨量（mm）", title)
     fig.update_xaxes(rangeslider=dict(visible=True, thickness=0.08, bgcolor="rgba(133,146,166,0.08)"))
     return fig
 
 
 def forecast(frame: pd.DataFrame, target) -> go.Figure:
-    """線上預測：目標前 23 小時與目標小時的觀測（長條）和預測（折線）；目標小時另外標出。"""
+    """線上預測：目標前各小時的觀測雨量畫實線，紅色虛線從最後一筆觀測連到目標小時的預測點；
+    目標小時已經有觀測（歷史資料）時，另畫長條對照。x 軸用真實時間，順序一定照時間排。"""
     fig = go.Figure()
-    x = frame["datetime"].dt.strftime("%m-%d %H:%M").tolist()
-    fig.add_trace(go.Bar(x=x, y=frame["actual"].round(2).tolist(), name="觀測雨量", marker_color=ACTUAL, opacity=0.55))
-    fig.add_trace(go.Scatter(x=x, y=frame["pred"].round(2).tolist(), name="預測雨量（只用該小時之前的觀測）",
-                             mode="lines+markers", line=dict(color=PRED, width=2), marker=dict(size=6)))
-    last = frame.iloc[-1]
-    fig.add_trace(go.Scatter(x=[x[-1]], y=[round(float(last["pred"]), 2)], name=f"預測目標 {pd.Timestamp(target):%m-%d %H:%M}",
-                             mode="markers", marker=dict(color=PRED, size=14, symbol="star")))
-    fig = _layout(fig, 380, "逐時雨量（mm）", "")
-    fig.update_layout(dragmode=False, bargap=0.25)
+    frame = frame.sort_values("datetime").reset_index(drop=True)
+    past, target_row = frame.iloc[:-1], frame.iloc[-1]
+    t = pd.Timestamp(target_row["datetime"])
+    if pd.notna(target_row["actual"]):
+        fig.add_trace(go.Bar(x=[t], y=[round(float(target_row["actual"]), 2)], name="實際觀測", marker_color=ACTUAL,
+                             opacity=0.4, width=3600 * 1000 * 0.5))
+    fig.add_trace(go.Scatter(x=past["datetime"].dt.strftime("%Y-%m-%d %H:%M").tolist(), y=past["actual"].round(2).tolist(), name="觀測雨量", mode="lines+markers",
+                             line=dict(color=ACTUAL, width=2), marker=dict(size=5)))
+    pred = round(float(target_row["pred"]), 2)
+    last_obs = past["actual"].last_valid_index()
+    if last_obs is not None:
+        fig.add_trace(go.Scatter(x=[past.at[last_obs, "datetime"], t], y=[round(float(past.at[last_obs, "actual"]), 2), pred],
+                                 mode="lines", line=dict(color=PRED, width=2, dash="dash"), showlegend=False,
+                                 hoverinfo="skip"))
+    fig.add_trace(go.Scatter(x=[t], y=[pred], name=f"預測 {pd.Timestamp(target):%m-%d %H:%M}", mode="markers",
+                             marker=dict(color=PRED, size=12)))
+    fig = _layout(fig, 360, "逐時雨量（mm）", "")
+    fig.update_layout(dragmode=False)
+    fig.update_xaxes(type="date", tickformat="%m-%d<br>%H:%M", dtick=2 * 3600 * 1000)
+    fig.update_yaxes(rangemode="tozero")
     return fig

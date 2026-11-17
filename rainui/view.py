@@ -22,14 +22,16 @@ def stats_html(station: dict, sub: str) -> str:
         # 數字是 ≥ 40 mm MAE，卡片標題要寫出來，不然看不出 18.55 是什麼
         ("未經較佳化兩階段分類器對照 ≥ 40 mm MAE", fmt(s["g1"].get("mae_ge40mm")),
          "純 MAE 對照組 ≥ 40 mm MAE " + fmt(s["control"].get("mae_ge40mm"))),
-        ("整體 MAE", fmt(s["overall_mae"], 3),
+        ("最佳模型整體 MAE", fmt(s["overall_mae"], 3),
          f"第 1 代 {fmt(s['g1'].get('overall_mae'), 3)}・對照 {fmt(s['control'].get('overall_mae'), 3)}"),
-        ("整體 RMSE", fmt(s["overall_rmse"], 3),
+        ("最佳模型整體 RMSE", fmt(s["overall_rmse"], 3),
          f"第 1 代 {fmt(s['g1'].get('overall_rmse'), 3)}・對照 {fmt(s['control'].get('overall_rmse'), 3)}"),
-        ("代數", str(s["generations"] or "–"), ""),
-        ("訓練次數", str(s["runs"] or "–"), f"實際訓練 {s['trained']} 次"),
     ]
-    body = "".join(f'<div class="stat"><span class="stat-k">{html.escape(k)}</span><span class="stat-v">{html.escape(v)}</span>'
+    test = results.predictions(station["subgoals"][sub]["artifact"], "test")
+    for thr in (10.0, 40.0):
+        cards.append((f"測試集 ≥ {thr:g} mm POD / FAR", *pod_far_text(results.pod_far(test, thr))))
+    body = "".join(f'<div class="stat"><span class="stat-k">{html.escape(k)}</span>'
+                   f'<span class="stat-v{" stat-v-sm" if "/" in v else ""}">{html.escape(v)}</span>'
                    f'<span class="stat-s">{html.escape(sub_)}</span></div>' for k, v, sub_ in cards)
     note = ""
     if s["message"]:
@@ -39,6 +41,25 @@ def stats_html(station: dict, sub: str) -> str:
     elif s["decision"] == "continue":
         note = '<div class="stop-note warn">這個副目標還沒跑完</div>'
     return f'<div class="stats">{body}</div>{note}'
+
+
+def pod_far_text(m: dict | None) -> tuple[str, str]:
+    """(卡片數字, 說明)：POD / FAR，說明寫觀測與命中的小時數。"""
+    if m is None:
+        return "–", "沒有測試集預測檔"
+    pod = "–" if m["pod"] is None else f'{m["pod"]:.2f}'
+    far = "–" if m["far"] is None else f'{m["far"]:.2f}'
+    return f"{pod} / {far}", f'觀測 {m["observed"]} 小時、命中 {m["hits"]} 小時'
+
+
+def conv_head_html(station: dict | None = None, sub: str = "") -> str:
+    """收斂圖卡片標題；右側用文字寫代數與訓練次數。"""
+    extra = ""
+    if station is not None:
+        s = results.stats(station, sub)
+        extra = (f'<span class="muted conv-meta">{s["generations"] or "–"} 代・訓練 {s["runs"] or "–"} 次'
+                 f'（實際訓練 {s["trained"]} 次）</span>')
+    return f'<div class="card-h"><h3>收斂圖</h3><span class="muted">訓練期 ≥ 40 mm MAE（mm）</span>{extra}</div>'
 
 
 def header_html(title: str, pill: str, meta: str, pill_kind: str = "ok") -> str:
@@ -101,9 +122,9 @@ def cache_index() -> dict:
 
 
 def file_chip(source: str, station: str, upload: dict | None, threshold: float) -> str:
-    if source in ("upload", "nchu"):
+    if source == "codis":
         if not upload:
-            return f'<div class="chip muted">{"尚未下載" if source == "nchu" else "尚未上傳"}</div>'
+            return '<div class="chip muted">尚未抓取</div>'
         mark, cls = ("✓", "ok") if not upload["errors"] else ("✕", "err")
         rows = f'{upload["rows"]:,} 小時' if upload["rows"] else ""
         extra = ""
@@ -130,30 +151,17 @@ def forecast_html(info: dict, spec: dict) -> str:
     actual = "尚無觀測" if info["actual"] is None else f'{info["actual"]:.1f} mm'
     verdict = "有雨" if info["has_rain"] else "無雨"
     amount = f'{info["pred"]:.1f} mm' if info["has_rain"] else "0 mm"
-    metric = {m["threshold"]: m for m in spec.get("test_metrics", [])}
-
-    def pf(thr):
-        m = metric.get(thr)
-        if not m:
-            return "–"
-        far = "–" if m["far"] is None else f'{m["far"]:.2f}'
-        return f'{m["pod"]:.2f} / {far}'
     cards = [
-        (f"{target:%Y-%m-%d %H:00} 雨量預測", amount, f"第一階段判定{verdict}（有雨機率 {info['rain_proba']:.2f}）"),
-        ("同時段觀測", actual, "CoDiS 有這一小時的資料才會顯示"),
-        ("使用的觀測", f'{info["hours_fetched"]} 小時',
-         f'{info["fetched_from"]:%m-%d %H:%M} 到 {target - pd.Timedelta(hours=1):%m-%d %H:%M}'
-         + (f'，其中今天 {info["realtime_hours"]} 小時來自開放資料' if info.get("realtime_hours") else "")),
-        ("測試集 ≥ 10 mm POD / FAR", pf(10.0), "2023–2025 逐時，參考用"),
-        ("測試集 ≥ 40 mm POD / FAR", pf(40.0), "2023–2025 逐時，參考用"),
+        (f"{target:%Y-%m-%d %H:00} 雨量預測", amount, f"第一階段判定{verdict}（LGBM 有雨機率 {info['rain_proba']:.2f}）"),
+        ("同時段觀測", actual, "有歷史資料才會顯示"),
     ]
-    body = "".join(f'<div class="stat"><span class="stat-k">{html.escape(k)}</span>'
-                   f'<span class="stat-v{" stat-v-sm" if "/" in v else ""}">{html.escape(v)}</span>'
-                   f'<span class="stat-s">{html.escape(s)}</span></div>' for k, v, s in cards)
+    body = "".join(f'<div class="stat{" stat-pred" if i == 0 else ""}"><span class="stat-k">{html.escape(k)}</span>'
+                   f'<span class="stat-v">{html.escape(v)}</span>'
+                   f'<span class="stat-s">{html.escape(s)}</span></div>' for i, (k, v, s) in enumerate(cards))
     note = "".join(f'<div class="stop-note warn">{html.escape(n)}</div>' for n in info.get("notes", []))
     if info.get("realtime_hours"):
-        note += ('<div class="stop-note">今天的整點來自氣象署開放資料，只有氣溫、溼度、氣壓、風、陣風與雨量；'
-                 '露點由氣溫與溼度算出，其他欄位沿用 CoDiS 昨天最後一筆（見下方資料來源）</div>')
+        note += ('<div class="stop-note warn">⚠️ 缺值警告：今日的整點只有氣溫、溼度、氣壓、風與雨量，'
+                 '其他欄位沿用昨日最後一筆（見下方模型輸入狀況）</div>')
     if info["has_rain"] and not info["lstm_available"]:
         note = (f'<div class="stop-note warn">判定有雨，但前 {info["time_step"]} 小時有雨量缺測，'
                 '第二階段無法預測雨量，暫以 0 mm 表示</div>')
@@ -161,13 +169,9 @@ def forecast_html(info: dict, spec: dict) -> str:
 
 
 def forecast_model_md(spec: dict) -> str:
-    return (f"**模型**：{stations.label(spec['station'])}，副目標「{SUBGOALS[spec['subgoal']]['short']}」的最佳基因 "
+    return (f"{stations.label(spec['station'])}，副目標「{SUBGOALS[spec['subgoal']]['short']}」的最佳基因 "
             f"{spec['run']}（{spec['lstm_layers']} 層 × {spec['lstm_units']} 單元、序列 {spec['time_step']} 小時、"
-            f"α = {spec['wmae_alpha']}）。\n\n"
-            "**流程**：輸入時間 T 後，當場抓 T 之前的逐時觀測（昨天以前來自 CoDiS，今天的整點來自氣象署開放資料），照訓練時的前處理組成特徵，"
-            "第一階段雙 LightGBM 判斷 T 有沒有雨，判定有雨才由 LSTM 用前 "
-            f"{spec['time_step']} 小時估雨量。資料不存檔。\n\n"
-            f"打包時已用同一套程式重算 {spec['verification']['test_hours']:,} 小時的測試集，與實驗輸出一致。")
+            f"α = {spec['wmae_alpha']}）")
 
 
 def coverage_rows(info: dict, spec: dict) -> list[list]:
