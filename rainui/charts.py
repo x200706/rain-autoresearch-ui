@@ -57,3 +57,18 @@ def predictions(frame: pd.DataFrame | None, title: str) -> go.Figure:
     fig = _layout(fig, 420, "逐時雨量（mm）", title)
     fig.update_xaxes(rangeslider=dict(visible=True, thickness=0.08, bgcolor="rgba(133,146,166,0.08)"))
     return fig
+
+
+def forecast(frame: pd.DataFrame, target) -> go.Figure:
+    """線上預測：目標前 23 小時與目標小時的觀測（長條）和預測（折線）；目標小時另外標出。"""
+    fig = go.Figure()
+    x = frame["datetime"].dt.strftime("%m-%d %H:%M").tolist()
+    fig.add_trace(go.Bar(x=x, y=frame["actual"].round(2).tolist(), name="觀測雨量", marker_color=ACTUAL, opacity=0.55))
+    fig.add_trace(go.Scatter(x=x, y=frame["pred"].round(2).tolist(), name="預測雨量（只用該小時之前的觀測）",
+                             mode="lines+markers", line=dict(color=PRED, width=2), marker=dict(size=6)))
+    last = frame.iloc[-1]
+    fig.add_trace(go.Scatter(x=[x[-1]], y=[round(float(last["pred"]), 2)], name=f"預測目標 {pd.Timestamp(target):%m-%d %H:%M}",
+                             mode="markers", marker=dict(color=PRED, size=14, symbol="star")))
+    fig = _layout(fig, 380, "逐時雨量（mm）", "")
+    fig.update_layout(dragmode=False, bargap=0.25)
+    return fig

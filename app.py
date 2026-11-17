@@ -1,18 +1,30 @@
 """Rain Autoresearch 的 Gradio 介面。啟動：python app.py（說明見 README）。"""
 import html
 import os
+import threading
 import time
 from pathlib import Path
 from urllib.parse import quote
 
 import gradio as gr
+import pandas as pd
 
-from rainui import charts, config, models, progress, results, runner, skill, stations, theme, view
+from rainui import charts, config, models, predict, progress, results, runner, skill, sources, stations, theme, view
 from rainui.stations import SUBGOAL_ORDER
 
 ASSETS = Path(__file__).resolve().parent / "assets"
 SPLITS = [("8 : 2", "82"), ("7 : 3", "73")]
-SOURCES = [("已有資料的測站", "existing"), ("上傳新測站 CSV", "upload")]
+SOURCES = [("已有資料", "existing"), ("中興大學", "nchu"), ("上傳 CSV", "upload")]
+FILE_SOURCES = ("upload", "nchu")      # 這兩種都是「一個新的 CSV」，之後的檢查與安裝相同
+MODES = [("訓練與評估", "train"), ("線上預測", "predict")]
+PRED_STATIONS = [(stations.label(sid), sid) for sid in predict.available()]
+PRED_HINT = ("輸入時間 T 後，會當場向氣象署 CoDiS 抓 T 之前的逐時觀測（較佳化搜尋最長的 24 小時序列再多一天），"
+             "預測 T 這一小時；不存檔。CoDiS 大約更新到前一天 24 時，所以最晚能預測今天 01 時。")
+
+
+def default_target() -> str:
+    """CoDiS 最新大約是今天 00 時，所以預設預測今天 01 時。"""
+    return (pd.Timestamp.now().normalize() + pd.Timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
 SUB_CHOICES = [(f"{s}｜{stations.SUBGOALS[s]['desc']}", s) for s in SUBGOAL_ORDER]
 METRIC_CHOICES = [("MAE", "mae"), ("RMSE", "rmse"), ("低估筆數", "under")]   # 三種都是越低越好，選項不再加註，免得窄欄被截斷
 PRED_SPLITS = [("訓練集", "train"), ("測試集", "test")]
@@ -71,9 +83,9 @@ def make_config(model, run_name, source, station, upload, split, metric, thr, su
                 max_gen, patience, children, parallel, template):
     """左側欄位 → RunConfig 與資料來源的錯誤。上傳模式只看上傳的檔案，選單模式只看選單。"""
     source_error = ""
-    if source == "upload":
+    if source in FILE_SOURCES:
         if not upload:
-            source_error = "請上傳測站 CSV"
+            source_error = "請先從中興大學下載資料" if source == "nchu" else "請上傳測站 CSV"
             sid = ""
         else:
             sid = upload["station"]
@@ -131,8 +143,30 @@ def skill_download(cfg: skill.RunConfig) -> str:
 
 
 def on_source(source):
-    upload_mode = source == "upload"
-    return gr.update(visible=not upload_mode), gr.update(visible=upload_mode, value=None), None
+    return (gr.update(visible=source == "existing"), gr.update(visible=source == "upload", value=None), None,
+            gr.update(visible=source == "nchu"), gr.update(visible=source == "nchu"))
+
+
+def on_nchu_kind(kind):
+    choices = sources.stations_of(kind)
+    return gr.update(choices=choices, value=choices[0][1] if choices else None)
+
+
+def on_nchu_download(station, progress=gr.Progress()):
+    """抓 2009 年到今天的整段資料；資料量不檢查，只要中興有回傳就能用。"""
+    if not station:
+        gr.Warning("請先選擇測站", duration=4)
+        return None
+    progress(0, desc=f"從中興大學下載 {station} 2009 年至今的逐時資料（約需 2–3 分鐘）")
+    try:
+        path = sources.nchu_download(station)
+    except ValueError as exc:
+        gr.Warning(str(exc), duration=8)
+        return {"name": f"中興大學 {station}", "station": station, "rows": 0, "rain": [], "errors": [str(exc)], "path": ""}
+    check = stations.check_csv(path)
+    name = sources.name_of(station)
+    return {"name": f"中興大學 {station} {name}（2009 年至今）", "station": station, "rows": check.rows,
+            "rain": check.rain, "errors": check.errors, "path": path}
 
 
 def on_upload(path):
@@ -206,6 +240,9 @@ def footer_html():
 
 # ---------------------------------------------------------------- build
 def build() -> gr.Blocks:
+    # 線上預測的模型（TensorFlow＋LightGBM）載入要十幾秒，介面一開就在背景先載，第一次按預測不用等
+    for sid in predict.available():
+        threading.Thread(target=predict.load_models, args=(sid,), daemon=True).start()
     model_ids, live = models.fetch()
     choices = stations.station_choices()
     default_station = next((sid for _, sid in choices if sid == "467590"), choices[0][1] if choices else None)
@@ -227,68 +264,83 @@ def build() -> gr.Blocks:
             # ---------------- left: settings
             with gr.Column(elem_id="left", min_width=0):
                 with gr.Column(elem_id="left-scroll", min_width=0):
-                    gr.HTML('<h3 class="lbl">1 · HERMES 代理（OPENROUTER）</h3>')
-                    api_key = gr.Textbox(label="API Key", type="password", placeholder="留空則用 Hermes 預設 Key")
-                    err_key = gr.Markdown(visible=False, elem_classes="ferr")
-                    model_label = f"代理模型 · {len(model_ids)} 個" + ("" if live else "（內建清單）")
-                    model = gr.Dropdown(model_ids, value=config.DEFAULT_MODEL, label=model_label, allow_custom_value=True,
-                                        filterable=True)
-                    err_model = gr.Markdown(visible=False, elem_classes="ferr")
+                    mode = gr.Radio(MODES, value="train", show_label=False, elem_classes="seg", elem_id="mode-switch")
+                    with gr.Column(min_width=0, elem_id="train-left") as train_left:
+                        gr.HTML('<h3 class="lbl">1 · HERMES 代理（OPENROUTER）</h3>')
+                        api_key = gr.Textbox(label="API Key", type="password", placeholder="留空則用 Hermes 預設 Key")
+                        err_key = gr.Markdown(visible=False, elem_classes="ferr")
+                        model_label = f"代理模型 · {len(model_ids)} 個" + ("" if live else "（內建清單）")
+                        model = gr.Dropdown(model_ids, value=config.DEFAULT_MODEL, label=model_label, allow_custom_value=True,
+                                            filterable=True)
+                        err_model = gr.Markdown(visible=False, elem_classes="ferr")
 
-                    gr.HTML('<h3 class="lbl">2 · 實驗與測站資料</h3>')
-                    root_box = gr.Textbox(str(config.rain_root()), label="實驗專案路徑")
-                    err_root = gr.Markdown(visible=False, elem_classes="ferr")
-                    run_name = gr.Textbox(label="實驗名稱", placeholder="例：竹子湖 第一次自動調參")
-                    source = gr.Radio(SOURCES, value="existing", label="資料來源", elem_classes="seg")
-                    station = gr.Dropdown(choices, value=default_station, label="測站", filterable=True)
-                    upload = gr.File(label="測站 CSV（檔名含站號，例：466930、C0A870）", file_types=[".csv"], type="filepath", visible=False)
-                    upload_state = gr.State(None)
-                    chip = gr.HTML()
-                    err_file = gr.Markdown(visible=False, elem_classes="ferr")
-                    split = gr.Radio(SPLITS, value="82", label="訓練／測試切分", elem_classes="seg")
+                        gr.HTML('<h3 class="lbl">2 · 實驗與測站資料</h3>')
+                        root_box = gr.Textbox(str(config.rain_root()), label="實驗專案路徑")
+                        err_root = gr.Markdown(visible=False, elem_classes="ferr")
+                        run_name = gr.Textbox(label="實驗名稱", placeholder="例：竹子湖 第一次自動調參")
+                        source = gr.Radio(SOURCES, value="existing", label="資料來源", elem_classes="seg")
+                        station = gr.Dropdown(choices, value=default_station, label="測站", filterable=True)
+                        with gr.Row(visible=False, elem_classes="pair") as nchu_row:
+                            nchu_kind = gr.Dropdown(sources.KINDS, value="有人站", label="站種", min_width=0)
+                            nchu_station = gr.Dropdown(sources.stations_of("有人站"), label="測站", filterable=True,
+                                                       min_width=0)
+                        nchu_btn = gr.Button("從中興大學下載 2009 年至今", size="sm", visible=False)
+                        upload = gr.File(label="測站 CSV（檔名含站號，例：466930、C0A870）", file_types=[".csv"], type="filepath", visible=False)
+                        upload_state = gr.State(None)
+                        chip = gr.HTML()
+                        err_file = gr.Markdown(visible=False, elem_classes="ferr")
+                        split = gr.Radio(SPLITS, value="82", label="訓練／測試切分", elem_classes="seg")
 
-                    gr.HTML('<h3 class="lbl">3 · 主目標 <span class="tok">[[MAIN_GOAL]]</span></h3>')
-                    with gr.Row(elem_classes="pair"):
-                        metric = gr.Dropdown(METRIC_CHOICES, value="mae", label="指標", min_width=0)
-                        thr = gr.Number(value=40, label="觀測雨量 ≥ (mm)", minimum=0, min_width=0)
-                    goal_key = gr.HTML()
-                    err_goal = gr.Markdown(visible=False, elem_classes="ferr")
+                        gr.HTML('<h3 class="lbl">3 · 主目標 <span class="tok">[[MAIN_GOAL]]</span></h3>')
+                        with gr.Row(elem_classes="pair"):
+                            metric = gr.Dropdown(METRIC_CHOICES, value="mae", label="指標", min_width=0)
+                            thr = gr.Number(value=40, label="觀測雨量 ≥ (mm)", minimum=0, min_width=0)
+                        goal_key = gr.HTML()
+                        err_goal = gr.Markdown(visible=False, elem_classes="ferr")
 
-                    gr.HTML('<h3 class="lbl">4 · 副目標 <span class="tok">[[SUB_GOALS]]</span></h3>')
-                    sub_mode = gr.Radio([("預設三種", "preset"), ("語意描述", "semantic")], value="preset", show_label=False,
-                                        elem_classes="seg")
-                    subs = gr.CheckboxGroup(SUB_CHOICES, value=list(SUBGOAL_ORDER), show_label=False, elem_classes="subs")
-                    sub_text = gr.Textbox(visible=False, lines=3, show_label=False,
-                                          placeholder="例：大雨時寧可高估也不要低估，整體誤差不能比原本差太多")
-                    err_sub = gr.Markdown(visible=False, elem_classes="ferr")
+                        gr.HTML('<h3 class="lbl">4 · 副目標 <span class="tok">[[SUB_GOALS]]</span></h3>')
+                        sub_mode = gr.Radio([("預設三種", "preset"), ("語意描述", "semantic")], value="preset", show_label=False,
+                                            elem_classes="seg")
+                        subs = gr.CheckboxGroup(SUB_CHOICES, value=list(SUBGOAL_ORDER), show_label=False, elem_classes="subs")
+                        sub_text = gr.Textbox(visible=False, lines=3, show_label=False,
+                                              placeholder="例：大雨時寧可高估也不要低估，整體誤差不能比原本差太多")
+                        err_sub = gr.Markdown(visible=False, elem_classes="ferr")
 
-                    gr.HTML('<h3 class="lbl">5 · 演化參數</h3>')
-                    with gr.Row(elem_classes="pair"):
-                        max_gen = gr.Number(value=20, label="最多代數 [[MAX_GEN]]", precision=0, min_width=0)
-                        patience = gr.Number(value=3, label="早停 [[PATIENCE]]", precision=0, min_width=0)
-                    with gr.Row(elem_classes="pair"):
-                        children = gr.Number(value=8, label="每代子代 [[CHILDREN]]", precision=0, min_width=0)
-                        parallel = gr.Number(value=3, label="同時訓練 [[PARALLEL]]", precision=0, min_width=0)
-                    err_evo = gr.Markdown(visible=False, elem_classes="ferr")
+                        gr.HTML('<h3 class="lbl">5 · 演化參數</h3>')
+                        with gr.Row(elem_classes="pair"):
+                            max_gen = gr.Number(value=20, label="最多代數 [[MAX_GEN]]", precision=0, min_width=0)
+                            patience = gr.Number(value=3, label="早停 [[PATIENCE]]", precision=0, min_width=0)
+                        with gr.Row(elem_classes="pair"):
+                            children = gr.Number(value=8, label="每代子代 [[CHILDREN]]", precision=0, min_width=0)
+                            parallel = gr.Number(value=3, label="同時訓練 [[PARALLEL]]", precision=0, min_width=0)
+                        err_evo = gr.Markdown(visible=False, elem_classes="ferr")
 
-                    with gr.Accordion("6 · 預覽", open=False, elem_id="preview"):
-                        err_tpl = gr.Markdown(visible=False, elem_classes="ferr")
-                        with gr.Tabs():
-                            with gr.Tab("SKILL.md 模板"):
-                                template = gr.Code(skill.DEFAULT_TEMPLATE, language="markdown", interactive=True,
-                                                   show_label=False, lines=14)
-                                tokens = gr.HTML()
-                            with gr.Tab("Shell 指令"):
-                                shell = gr.Code(language="shell", interactive=False, show_label=False)
-                        download = gr.HTML(elem_id="dl")
+                        with gr.Accordion("6 · 預覽", open=False, elem_id="preview"):
+                            err_tpl = gr.Markdown(visible=False, elem_classes="ferr")
+                            with gr.Tabs():
+                                with gr.Tab("SKILL.md 模板"):
+                                    template = gr.Code(skill.DEFAULT_TEMPLATE, language="markdown", interactive=True,
+                                                       show_label=False, lines=14)
+                                    tokens = gr.HTML()
+                                with gr.Tab("Shell 指令"):
+                                    shell = gr.Code(language="shell", interactive=False, show_label=False)
+                            download = gr.HTML(elem_id="dl")
+                    with gr.Column(min_width=0, visible=False, elem_id="pred-left") as pred_left:
+                        gr.HTML('<h3 class="lbl">線上預測 · 當場向氣象署 CoDiS 抓觀測</h3>')
+                        pred_station = gr.Dropdown(PRED_STATIONS, value=PRED_STATIONS[0][1] if PRED_STATIONS else None,
+                                                   label="測站（已打包最佳兩階段模型）")
+                        pred_time = gr.DateTime(value=default_target(), include_time=True, type="string",
+                                                label="要預測的時間（取整點）")
+                        gr.Markdown(PRED_HINT, elem_classes="hint")
 
                 with gr.Column(elem_id="startbar"):
                     start = gr.Button("開始訓練", variant="primary", size="lg", elem_id="start-btn")
+                    pred_btn = gr.Button("預測這一小時", variant="primary", size="lg", visible=False, elem_id="pred-btn")
                     hit_state = gr.State("")
 
             # ---------------- middle: results / running
             with gr.Column(elem_id="main", min_width=0):
-                with gr.Row(elem_id="viewbar"):
+                with gr.Row(elem_id="viewbar") as viewbar:
                     head = gr.HTML()
                     load_cfg = gr.Button("載入這次設定", size="sm", scale=0, min_width=0)
                     del_btn = gr.Button("刪除實驗", size="sm", scale=0, min_width=0, elem_id="del-btn")
@@ -324,13 +376,27 @@ def build() -> gr.Blocks:
                             learn_md = gr.Markdown(elem_classes="md")
                         with gr.Tab("組合後 SKILL.md"):
                             skill_md = gr.Markdown(elem_classes="md")
-                with gr.Group(elem_classes="card notes"):
+                with gr.Group(elem_classes="card notes") as notes_card:
                     gr.HTML('<div class="card-h"><h3>備註</h3><span class="muted">實驗結束後可以寫下觀察，存在介面的 runs/ 目錄</span></div>')
                     notes = gr.Textbox(show_label=False, lines=3, placeholder="例：α 偏高時低估少但高估多……")
                     save_notes = gr.Button("儲存備註", size="sm")
 
+                with gr.Column(visible=False, elem_id="forecast", min_width=0) as pred_group:
+                    pred_head = gr.HTML(view.header_html("線上預測", "", "選好測站與時間後按「預測這一小時」"))
+                    pred_stats = gr.HTML()
+                    with gr.Group(elem_classes="card"):
+                        gr.HTML('<div class="card-h"><h3>預測與觀測</h3><span class="muted">目標小時與前 23 小時；'
+                                '每一點都只用該小時之前的觀測</span></div>')
+                        pred_chart = gr.Plot(show_label=False)
+                    with gr.Group(elem_classes="card"):
+                        gr.HTML('<div class="card-h"><h3>模型與資料來源</h3></div>')
+                        pred_model = gr.Markdown(view.forecast_model_md(predict.load_spec(PRED_STATIONS[0][1]))
+                                                 if PRED_STATIONS else "沒有打包好的模型（deploy/）", elem_classes="md")
+                        pred_cov = gr.Dataframe(headers=["欄位", "用途", "這段時間"], interactive=False, wrap=True,
+                                                elem_classes="df")
+
             # ---------------- right: history
-            with gr.Column(elem_id="hist", min_width=0):
+            with gr.Column(elem_id="hist", min_width=0) as hist_col:
                 gr.HTML('<h3 class="lbl">歷代實驗</h3>')
                 hist_q = gr.Textbox(show_label=False, placeholder="搜尋站號或名稱…")
                 hist = gr.HTML(view.history_html(view.history_items(), first_view))
@@ -350,7 +416,12 @@ def build() -> gr.Blocks:
             if comp is upload_state:
                 continue
             comp.change(refresh_left, left_inputs, left_outputs, show_progress="hidden")
-        source.change(on_source, source, [station, upload, upload_state]).then(
+        source.change(on_source, source, [station, upload, upload_state, nchu_row, nchu_btn]).then(
+            refresh_left, left_inputs, left_outputs, show_progress="hidden")
+        nchu_kind.change(on_nchu_kind, nchu_kind, nchu_station)
+        nchu_station.change(lambda: None, None, upload_state).then(refresh_left, left_inputs, left_outputs,
+                                                                    show_progress="hidden")
+        nchu_btn.click(on_nchu_download, nchu_station, upload_state).then(
             refresh_left, left_inputs, left_outputs, show_progress="hidden")
         upload.change(on_upload, upload, upload_state).then(refresh_left, left_inputs, left_outputs, show_progress="hidden")
         sub_mode.change(on_sub_mode, sub_mode, [subs, sub_text])
@@ -395,7 +466,7 @@ def build() -> gr.Blocks:
                     run = runner.continue_run(target["id"], cfg, api_key=api or "")
                 else:
                     run = runner.start_run(cfg, api_key=api or "",
-                                           upload_path=upload_info["path"] if values[2] == "upload" and upload_info else "")
+                                           upload_path=upload_info["path"] if values[2] in FILE_SOURCES and upload_info else "")
             except (ValueError, RuntimeError, OSError) as exc:
                 gr.Warning(str(exc), duration=4)
                 return gr.update()
@@ -489,6 +560,36 @@ def build() -> gr.Blocks:
             return (*show(key, sub, psplit, g, query), footer_html())
         timer.tick(tick, [view_key, sub_tabs, pred_split, gen, hist_q], [*full_outputs, footer],
                    show_progress="hidden")
+
+        # ---------------- 線上預測
+        train_only = [train_left, start, viewbar, flow, notes_card, hist_col]
+
+        def on_mode(m):
+            pred = m == "predict"
+            return (*[gr.update(visible=not pred)] * len(train_only), gr.update(visible=pred), gr.update(visible=pred),
+                    gr.update(visible=pred), *([gr.update(visible=False)] * 3 if pred else [gr.update()] * 3))
+        mode.change(on_mode, mode, [*train_only, pred_left, pred_btn, pred_group, log_group, result_group, del_confirm]
+                    ).then(lambda m, k, s, p, q: show(k, s, p, "全部", q) if m == "train" else (gr.skip(),) * len(full_outputs),
+                           [mode, view_key, sub_tabs, pred_split, hist_q], full_outputs)
+
+        def run_forecast(sid, when):
+            if not sid or not when:
+                gr.Warning("請選擇測站與時間", duration=4)
+                return (gr.skip(),) * 5
+            spec = predict.load_spec(sid)
+            try:
+                frame, info = predict.forecast(sid, when)
+            except predict.ForecastError as exc:
+                gr.Warning(str(exc), duration=8)
+                return (view.header_html("無法預測", "", str(exc), "err"), "", gr.update(), view.forecast_model_md(spec), None)
+            head = view.header_html(f"{stations.label(sid)}・{info['target']:%Y-%m-%d %H:00}", "已預測",
+                                    f"CoDiS 觀測到 {info['last_observed']:%Y-%m-%d %H:%M}", "ok")
+            return (head, view.forecast_html(info, spec), charts.forecast(frame, info["target"]),
+                    view.forecast_model_md(spec), view.coverage_rows(info, spec))
+        pred_btn.click(run_forecast, [pred_station, pred_time],
+                       [pred_head, pred_stats, pred_chart, pred_model, pred_cov])
+        pred_station.change(lambda sid: view.forecast_model_md(predict.load_spec(sid)) if sid else "", pred_station,
+                            pred_model)
 
         demo.load(refresh_left, left_inputs, left_outputs)
         demo.load(**after)

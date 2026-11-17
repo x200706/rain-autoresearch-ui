@@ -36,7 +36,7 @@ def test_bad_upload_blocks_and_switching_source_clears_it(rain_root, tmp_path):
     cfg, err = app.make_config(*left(source="upload", upload=bad))
     assert err and skill.blocking(skill.field_errors(cfg, "", err))
     # 改回「已有資料的測站」：上傳的檔案被清掉，不會偷偷留著，也不會把上傳的站加進選單
-    station_update, upload_update, state = app.on_source("existing")
+    station_update, upload_update, state, _, _ = app.on_source("existing")
     assert upload_update["value"] is None and state is None and station_update["visible"]
     cfg, err = app.make_config(*left(source="existing", upload=None))
     assert not err and cfg.station == "467590"
@@ -154,3 +154,25 @@ def test_start_button_names_what_blocks_it(rain_root):
     """副目標全部取消勾選時，按鈕本身寫出原因，不只欄位下方的紅字。"""
     make_station(rain_root, "467590")
     assert start_label(app.refresh_left("", *left(subs=[]))) == "無法開始：至少勾一種副目標"
+
+
+def test_nchu_source_needs_a_download_and_then_behaves_like_upload(rain_root, tmp_path, monkeypatch):
+    make_station(rain_root, "467590")
+    cfg, err = app.make_config(*left(source="nchu", upload=None, station="467590"))
+    assert cfg.station == "" and err == "請先從中興大學下載資料"
+    csv_path = make_csv(tmp_path / "466910.csv")
+    monkeypatch.setattr(app.sources, "nchu_download", lambda sid: str(csv_path))
+    monkeypatch.setattr(app.sources, "name_of", lambda sid: "鞍部")
+    got = app.on_nchu_download("466910", progress=lambda *a, **k: None)
+    assert got["station"] == "466910" and not got["errors"] and "鞍部" in got["name"]
+    cfg, err = app.make_config(*left(source="nchu", upload=got, station="467590"))
+    assert cfg.station == "466910" and not err
+
+
+def test_nchu_without_data_says_the_station_cannot_be_used(monkeypatch):
+    def fail(sid):
+        raise ValueError(f"中興大學資料庫沒有 {sid} 的資料，這個測站不能用")
+    monkeypatch.setattr(app.sources, "nchu_download", fail)
+    monkeypatch.setattr(app.gr, "Warning", lambda *a, **k: None)
+    got = app.on_nchu_download("C1Z999", progress=lambda *a, **k: None)
+    assert got["errors"] == ["中興大學資料庫沒有 C1Z999 的資料，這個測站不能用"]

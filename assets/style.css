@@ -248,3 +248,12 @@ h3.lbl .tok { letter-spacing: 0; }
 #main:has(#flowbox .flow) .notes textarea { flex: 1 1 auto !important; height: auto !important; max-height: none !important;
   min-height: 0 !important; resize: none; overflow-y: auto !important; }
 #main:has(#flowbox .flow) .notes > .styler > button { flex: 0 0 auto !important; }
+/* 線上預測沒有歷代實驗欄：右欄隱藏時主畫面吃掉那一欄（三種寬度都適用） */
+#layout:has(> #hist.hide) { grid-template-columns: minmax(390px, 470px) minmax(0, 1fr) !important;
+  grid-template-rows: minmax(0, 1fr) !important; grid-template-areas: "left main" !important; }
+@media (max-width: 860px) {
+  #layout:has(> #hist.hide) { grid-template-columns: minmax(0, 1fr) !important; grid-template-rows: none !important;
+    grid-template-areas: "left" "main" !important; }
+}
+#left .hint p { font-size: var(--text-sm); color: var(--body-text-color-subdued); line-height: 1.6; }
+.stat-v.stat-v-sm { font-size: var(--text-xl); white-space: nowrap; }

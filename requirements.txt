@@ -1,4 +1,11 @@
 gradio>=5.15,<6
 plotly>=5.24,<7
 pandas>=2.0
+requests>=2.31
+beautifulsoup4>=4.12
+# 線上預測：模型檔用這些版本存的（deploy/），版本差太多可能載入失敗
+tensorflow>=2.21,<2.22
+lightgbm>=4.6,<5
+scikit-learn>=1.7,<1.8
+joblib>=1.5
 pytest>=8

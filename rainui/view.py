@@ -2,6 +2,8 @@
 import html
 import time
 
+import pandas as pd
+
 from . import config, results, runner, skill, stations
 from .stations import SUBGOALS
 
@@ -99,9 +101,9 @@ def cache_index() -> dict:
 
 
 def file_chip(source: str, station: str, upload: dict | None, threshold: float) -> str:
-    if source == "upload":
+    if source in ("upload", "nchu"):
         if not upload:
-            return '<div class="chip muted">尚未上傳</div>'
+            return f'<div class="chip muted">{"尚未下載" if source == "nchu" else "尚未上傳"}</div>'
         mark, cls = ("✓", "ok") if not upload["errors"] else ("✕", "err")
         rows = f'{upload["rows"]:,} 小時' if upload["rows"] else ""
         extra = ""
@@ -120,3 +122,66 @@ def tokens_html(template: str) -> str:
 
 def sub_tab_choices() -> list[tuple[str, str]]:
     return [(SUBGOALS[s]["tab"], s) for s in stations.SUBGOAL_ORDER]
+
+
+def forecast_html(info: dict, spec: dict) -> str:
+    """線上預測的結果卡片、模型說明與資料來源。"""
+    target = info["target"]
+    actual = "尚無觀測" if info["actual"] is None else f'{info["actual"]:.1f} mm'
+    verdict = "有雨" if info["has_rain"] else "無雨"
+    amount = f'{info["pred"]:.1f} mm' if info["has_rain"] else "0 mm"
+    metric = {m["threshold"]: m for m in spec.get("test_metrics", [])}
+
+    def pf(thr):
+        m = metric.get(thr)
+        if not m:
+            return "–"
+        far = "–" if m["far"] is None else f'{m["far"]:.2f}'
+        return f'{m["pod"]:.2f} / {far}'
+    cards = [
+        (f"{target:%Y-%m-%d %H:00} 雨量預測", amount, f"第一階段判定{verdict}（有雨機率 {info['rain_proba']:.2f}）"),
+        ("同時段觀測", actual, "CoDiS 有這一小時的資料才會顯示"),
+        ("使用的觀測", f'{info["hours_fetched"]} 小時', f'{info["fetched_from"]:%m-%d %H:%M} 到 {target - pd.Timedelta(hours=1):%m-%d %H:%M}'),
+        ("測試集 ≥ 10 mm POD / FAR", pf(10.0), "2023–2025 逐時，參考用"),
+        ("測試集 ≥ 40 mm POD / FAR", pf(40.0), "2023–2025 逐時，參考用"),
+    ]
+    body = "".join(f'<div class="stat"><span class="stat-k">{html.escape(k)}</span>'
+                   f'<span class="stat-v{" stat-v-sm" if "/" in v else ""}">{html.escape(v)}</span>'
+                   f'<span class="stat-s">{html.escape(s)}</span></div>' for k, v, s in cards)
+    note = ""
+    if info["has_rain"] and not info["lstm_available"]:
+        note = (f'<div class="stop-note warn">判定有雨，但前 {info["time_step"]} 小時有雨量缺測，'
+                '第二階段無法預測雨量，暫以 0 mm 表示</div>')
+    return f'<div class="stats">{body}</div>{note}'
+
+
+def forecast_model_md(spec: dict) -> str:
+    return (f"**模型**：{stations.label(spec['station'])}，副目標「{SUBGOALS[spec['subgoal']]['short']}」的最佳基因 "
+            f"{spec['run']}（{spec['lstm_layers']} 層 × {spec['lstm_units']} 單元、序列 {spec['time_step']} 小時、"
+            f"α = {spec['wmae_alpha']}）。\n\n"
+            "**流程**：輸入時間 T 後，當場向氣象署 CoDiS 抓 T 之前的逐時觀測，照訓練時的前處理組成特徵，"
+            "第一階段雙 LightGBM 判斷 T 有沒有雨，判定有雨才由 LSTM 用前 "
+            f"{spec['time_step']} 小時估雨量。資料不存檔。\n\n"
+            f"打包時已用同一套程式重算 {spec['verification']['test_hours']:,} 小時的測試集，與實驗輸出一致。")
+
+
+def coverage_rows(info: dict, spec: dict) -> list[list]:
+    """gate 與 LSTM 需要的原始欄位，在抓到的資料裡有值的比例；沒有的欄位會用訓練資料的最後觀測或中位數補。"""
+    from . import codis, predict
+    names = {predict.COL_MAPPING.get(c, c): c for c in codis.COLUMNS}     # 訓練用名稱 → CoDiS 轉出的欄名
+    cov = info["column_coverage"]
+    rows = []
+    for col in predict.gate_raw_columns(spec["gate_features"]) + ["WD02", "WD08"]:
+        src = names.get(col, col)
+        share = cov.get(src)
+        used = "LSTM＋分類器" if col in spec["lstm_features"] or f"{col}_sin" in spec["lstm_features"] else "分類器"
+        if share is None:
+            status = "CoDiS 沒有此欄，沿用訓練資料最後觀測／中位數"
+        elif share == 0:
+            status = "這段時間都缺測，沿用訓練資料最後觀測／中位數"
+        elif share >= 1:
+            status = "每小時都有值"
+        else:
+            status = f"{share:.0%} 小時有值，缺的照訓練規則插值、向前填"
+        rows.append([src, used, status])
+    return rows
