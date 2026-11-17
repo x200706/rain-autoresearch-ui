@@ -46,3 +46,43 @@ def test_station_table_groups_by_kind():
     table = sources.parse_table(html)
     assert dict(zip(table["站號"], table["分類"])) == {"466910": "有人站", "C0A870": "自動氣象站",
                                                        "C1A630": "自動雨量站", "72C440": "農業站"}
+
+
+def _station(t, rain, temp=20.0, rh=90.0):
+    return {"StationName": "鞍部", "StationId": "466910", "ObsTime": {"DateTime": f"{t}+08:00"},
+            "WeatherElement": {"Now": {"Precipitation": rain}, "WindDirection": 180, "WindSpeed": 2.0,
+                               "AirTemperature": temp, "RelativeHumidity": rh, "AirPressure": 922.5,
+                               "GustInfo": {"PeakGustSpeed": 5.1, "Occurred_at": {"WindDirection": 170}}}}
+
+
+def test_realtime_hourly_rain_from_daily_total_and_dew_point(monkeypatch):
+    from rainui import cwa_realtime
+    snaps = [_station("2026-11-17T00:00:00", 12.0), _station("2026-11-17T01:00:00", 0.5),
+             _station("2026-11-17T01:10:00", 0.5), _station("2026-11-17T02:00:00", 3.0),
+             _station("2026-11-17T03:00:00", -99)]
+    monkeypatch.setattr(cwa_realtime, "history", lambda *a: [cwa_realtime.parse_station(s) for s in snaps[:4]])
+    monkeypatch.setattr(cwa_realtime, "latest", lambda *a: [cwa_realtime.parse_station(snaps[4])])
+    frame, notes = cwa_realtime.fetch("k", "466910", "2026-11-17 00:00", "2026-11-17 03:00")
+    assert list(frame["觀測時間(hour)"].dt.hour) == [0, 1, 2, 3]          # 01:10 不是整點，不取
+    rain = frame["降水量(mm)"].tolist()
+    assert np.isnan(rain[0]) and rain[1:3] == [0.5, 2.5] and np.isnan(rain[3])   # 換日歸零、缺測
+    assert frame.loc[1, "露點溫度(℃)"] == pytest.approx(18.4, abs=0.1)
+    assert frame.loc[1, "最大陣風風向(360degree)"] == 170 and not notes
+
+
+def test_forecast_needs_a_key_for_today_and_merges_realtime_with_it(monkeypatch):
+    from rainui import cwa_realtime
+    if not predict.available():
+        pytest.skip("deploy/ 沒有模型")
+    sid = predict.available()[0]
+    times = pd.date_range("2026-11-14 00:00", "2026-11-17 00:00", freq="h")
+    monkeypatch.setattr(codis, "fetch", lambda *a, **k: pd.DataFrame({"觀測時間(hour)": times, "降水量(mm)": 0.0,
+                                                                        "氣溫(℃)": 15.0}))
+    with pytest.raises(predict.ForecastError, match="請在上方輸入氣象署開放資料授權碼"):
+        predict.forecast(sid, "2026-11-17 19:00")
+    today = pd.date_range("2026-11-17 00:00", "2026-11-17 18:00", freq="h")
+    rt = pd.DataFrame({"觀測時間(hour)": today, "降水量(mm)": 0.0, "氣溫(℃)": 16.0})
+    monkeypatch.setattr(cwa_realtime, "fetch", lambda *a, **k: (rt, []))
+    frame, info = predict.forecast(sid, "2026-11-17 19:00", key="k")
+    assert info["realtime_hours"] == 18 and info["last_observed"] == pd.Timestamp("2026-11-17 18:00")
+    assert frame["datetime"].iloc[-1] == pd.Timestamp("2026-11-17 19:00") and not np.isnan(info["rain_proba"])

@@ -270,10 +270,11 @@ class ForecastError(Exception):
     """抓不到資料或時間超出可預測範圍；訊息直接顯示給使用者。"""
 
 
-def forecast(station: str, target, context: int = 24) -> tuple[pd.DataFrame, dict]:
+def forecast(station: str, target, context: int = 24, key: str = "") -> tuple[pd.DataFrame, dict]:
     """預測 target 這一小時（只用 target 之前的觀測），並附上前 context−1 小時的預測當對照。
-    資料當場向 CoDiS 抓，不存檔。回傳 (逐時預測, 摘要)。"""
-    from . import codis
+    資料當場抓、不存檔：CoDiS 到前一天 24 時；有氣象署開放資料授權碼時，今天的整點由開放資料補上。
+    回傳 (逐時預測, 摘要)。"""
+    from . import codis, cwa_realtime
     spec = load_spec(station)
     target = pd.Timestamp(target).floor("h")
     first_target = target - pd.Timedelta(hours=context - 1)
@@ -285,10 +286,25 @@ def forecast(station: str, target, context: int = 24) -> tuple[pd.DataFrame, dic
     observed = raw.dropna(subset=["降水量(mm)"]) if len(raw) else raw
     if observed.empty:
         raise ForecastError(f"CoDiS 沒有 {start:%Y-%m-%d %H:%M} 到 {target:%Y-%m-%d %H:%M} 的觀測")
-    last = pd.Timestamp(observed["觀測時間(hour)"].max())
-    if target - pd.Timedelta(hours=1) > last:
-        raise ForecastError(f"CoDiS 目前只到 {last:%Y-%m-%d %H:%M}，最晚能預測 {last + pd.Timedelta(hours=1):%Y-%m-%d %H:%M}"
-                            "（CoDiS 大約更新到前一天 24 時）")
+    codis_last = pd.Timestamp(observed["觀測時間(hour)"].max())
+    last, realtime_hours, notes = codis_last, 0, []
+    if target - pd.Timedelta(hours=1) > codis_last:
+        if not key.strip():
+            raise ForecastError(f"CoDiS 目前只到 {codis_last:%Y-%m-%d %H:%M}，最晚能預測 "
+                                f"{codis_last + pd.Timedelta(hours=1):%Y-%m-%d %H:%M}；要預測更晚的時間，"
+                                "請在上方輸入氣象署開放資料授權碼")
+        try:
+            rt, notes = cwa_realtime.fetch(key.strip(), station, codis_last, target)
+        except cwa_realtime.RealtimeError as exc:
+            raise ForecastError(str(exc)) from None
+        rt = rt[rt["觀測時間(hour)"] > codis_last]
+        realtime_hours = int((rt["觀測時間(hour)"] < target).sum())
+        raw = pd.concat([raw[raw["觀測時間(hour)"] <= codis_last], rt], ignore_index=True)
+        if len(rt):
+            last = pd.Timestamp(rt["觀測時間(hour)"].max())
+        if target - pd.Timedelta(hours=1) > last:
+            raise ForecastError(f"氣象署開放資料目前只到 {last:%Y-%m-%d %H:%M}，最晚能預測 "
+                                f"{last + pd.Timedelta(hours=1):%Y-%m-%d %H:%M}")
     if pd.Timestamp(raw["觀測時間(hour)"].max()) < target:      # 目標還沒有觀測：補一列空白，只當時間軸
         raw = pd.concat([raw, pd.DataFrame({"觀測時間(hour)": [target]})], ignore_index=True)
     df, _ = build_features(raw, spec)
@@ -304,5 +320,6 @@ def forecast(station: str, target, context: int = 24) -> tuple[pd.DataFrame, dic
             "has_rain": bool(row["has_rain_pred"]), "pred": float(row["pred"]),
             "actual": None if pd.isna(row["actual"]) else float(row["actual"]),
             "lstm_available": bool(row["lstm_sequence_available"]), "fetched_from": start, "last_observed": last,
+            "codis_last": codis_last, "realtime_hours": realtime_hours, "notes": notes,
             "hours_fetched": int(len(before)), "time_step": spec["time_step"], "column_coverage": sources}
     return frame, info

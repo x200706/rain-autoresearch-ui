@@ -141,14 +141,19 @@ def forecast_html(info: dict, spec: dict) -> str:
     cards = [
         (f"{target:%Y-%m-%d %H:00} 雨量預測", amount, f"第一階段判定{verdict}（有雨機率 {info['rain_proba']:.2f}）"),
         ("同時段觀測", actual, "CoDiS 有這一小時的資料才會顯示"),
-        ("使用的觀測", f'{info["hours_fetched"]} 小時', f'{info["fetched_from"]:%m-%d %H:%M} 到 {target - pd.Timedelta(hours=1):%m-%d %H:%M}'),
+        ("使用的觀測", f'{info["hours_fetched"]} 小時',
+         f'{info["fetched_from"]:%m-%d %H:%M} 到 {target - pd.Timedelta(hours=1):%m-%d %H:%M}'
+         + (f'，其中今天 {info["realtime_hours"]} 小時來自開放資料' if info.get("realtime_hours") else "")),
         ("測試集 ≥ 10 mm POD / FAR", pf(10.0), "2023–2025 逐時，參考用"),
         ("測試集 ≥ 40 mm POD / FAR", pf(40.0), "2023–2025 逐時，參考用"),
     ]
     body = "".join(f'<div class="stat"><span class="stat-k">{html.escape(k)}</span>'
                    f'<span class="stat-v{" stat-v-sm" if "/" in v else ""}">{html.escape(v)}</span>'
                    f'<span class="stat-s">{html.escape(s)}</span></div>' for k, v, s in cards)
-    note = ""
+    note = "".join(f'<div class="stop-note warn">{html.escape(n)}</div>' for n in info.get("notes", []))
+    if info.get("realtime_hours"):
+        note += ('<div class="stop-note">今天的整點來自氣象署開放資料，只有氣溫、溼度、氣壓、風、陣風與雨量；'
+                 '露點由氣溫與溼度算出，其他欄位沿用 CoDiS 昨天最後一筆（見下方資料來源）</div>')
     if info["has_rain"] and not info["lstm_available"]:
         note = (f'<div class="stop-note warn">判定有雨，但前 {info["time_step"]} 小時有雨量缺測，'
                 '第二階段無法預測雨量，暫以 0 mm 表示</div>')
@@ -159,7 +164,7 @@ def forecast_model_md(spec: dict) -> str:
     return (f"**模型**：{stations.label(spec['station'])}，副目標「{SUBGOALS[spec['subgoal']]['short']}」的最佳基因 "
             f"{spec['run']}（{spec['lstm_layers']} 層 × {spec['lstm_units']} 單元、序列 {spec['time_step']} 小時、"
             f"α = {spec['wmae_alpha']}）。\n\n"
-            "**流程**：輸入時間 T 後，當場向氣象署 CoDiS 抓 T 之前的逐時觀測，照訓練時的前處理組成特徵，"
+            "**流程**：輸入時間 T 後，當場抓 T 之前的逐時觀測（昨天以前來自 CoDiS，今天的整點來自氣象署開放資料），照訓練時的前處理組成特徵，"
             "第一階段雙 LightGBM 判斷 T 有沒有雨，判定有雨才由 LSTM 用前 "
             f"{spec['time_step']} 小時估雨量。資料不存檔。\n\n"
             f"打包時已用同一套程式重算 {spec['verification']['test_hours']:,} 小時的測試集，與實驗輸出一致。")

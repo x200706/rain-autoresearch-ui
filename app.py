@@ -18,13 +18,16 @@ SOURCES = [("已有資料", "existing"), ("中興大學", "nchu"), ("上傳 CSV"
 FILE_SOURCES = ("upload", "nchu")      # 這兩種都是「一個新的 CSV」，之後的檢查與安裝相同
 MODES = [("訓練與評估", "train"), ("線上預測", "predict")]
 PRED_STATIONS = [(stations.label(sid), sid) for sid in predict.available()]
-PRED_HINT = ("輸入時間 T 後，會當場向氣象署 CoDiS 抓 T 之前的逐時觀測（較佳化搜尋最長的 24 小時序列再多一天），"
-             "預測 T 這一小時；不存檔。CoDiS 大約更新到前一天 24 時，所以最晚能預測今天 01 時。")
+PRED_HINT = ("按下預測後，當場抓 T 之前的逐時觀測（較佳化搜尋最長的 24 小時序列再多一天），預測 T 這一小時；不存檔。"
+             "到昨天 24 時的資料來自氣象署 CoDiS（不需授權碼）；今天的整點要用氣象署開放資料，需要授權碼。"
+             "沒有授權碼時最晚只能預測今天 01 時。\n\n"
+             "授權碼：到 [氣象資料開放平臺](https://opendata.cwa.gov.tw/user/authkey) 免費註冊、登入後複製。"
+             "授權碼只用在這次預測，不會存檔。")
 
 
 def default_target() -> str:
-    """CoDiS 最新大約是今天 00 時，所以預設預測今天 01 時。"""
-    return (pd.Timestamp.now().normalize() + pd.Timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+    """預設預測下一個整點。"""
+    return (pd.Timestamp.now().floor("h") + pd.Timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
 SUB_CHOICES = [(f"{s}｜{stations.SUBGOALS[s]['desc']}", s) for s in SUBGOAL_ORDER]
 METRIC_CHOICES = [("MAE", "mae"), ("RMSE", "rmse"), ("低估筆數", "under")]   # 三種都是越低越好，選項不再加註，免得窄欄被截斷
 PRED_SPLITS = [("訓練集", "train"), ("測試集", "test")]
@@ -326,7 +329,9 @@ def build() -> gr.Blocks:
                                     shell = gr.Code(language="shell", interactive=False, show_label=False)
                             download = gr.HTML(elem_id="dl")
                     with gr.Column(min_width=0, visible=False, elem_id="pred-left") as pred_left:
-                        gr.HTML('<h3 class="lbl">線上預測 · 當場向氣象署 CoDiS 抓觀測</h3>')
+                        gr.HTML('<h3 class="lbl">線上預測 · 當場向氣象署抓觀測</h3>')
+                        cwa_key = gr.Textbox(label="氣象署開放資料授權碼", type="password",
+                                             placeholder="CWA-XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX")
                         pred_station = gr.Dropdown(PRED_STATIONS, value=PRED_STATIONS[0][1] if PRED_STATIONS else None,
                                                    label="測站（已打包最佳兩階段模型）")
                         pred_time = gr.DateTime(value=default_target(), include_time=True, type="string",
@@ -572,21 +577,23 @@ def build() -> gr.Blocks:
                     ).then(lambda m, k, s, p, q: show(k, s, p, "全部", q) if m == "train" else (gr.skip(),) * len(full_outputs),
                            [mode, view_key, sub_tabs, pred_split, hist_q], full_outputs)
 
-        def run_forecast(sid, when):
+        def run_forecast(key, sid, when):
             if not sid or not when:
                 gr.Warning("請選擇測站與時間", duration=4)
                 return (gr.skip(),) * 5
             spec = predict.load_spec(sid)
             try:
-                frame, info = predict.forecast(sid, when)
+                frame, info = predict.forecast(sid, when, key=key or "")
             except predict.ForecastError as exc:
                 gr.Warning(str(exc), duration=8)
                 return (view.header_html("無法預測", "", str(exc), "err"), "", gr.update(), view.forecast_model_md(spec), None)
-            head = view.header_html(f"{stations.label(sid)}・{info['target']:%Y-%m-%d %H:00}", "已預測",
-                                    f"CoDiS 觀測到 {info['last_observed']:%Y-%m-%d %H:%M}", "ok")
+            src = f"CoDiS 到 {info['codis_last']:%m-%d %H:%M}"
+            if info["realtime_hours"]:
+                src += f"・開放資料到 {info['last_observed']:%m-%d %H:%M}"
+            head = view.header_html(f"{stations.label(sid)}・{info['target']:%Y-%m-%d %H:00}", "已預測", src, "ok")
             return (head, view.forecast_html(info, spec), charts.forecast(frame, info["target"]),
                     view.forecast_model_md(spec), view.coverage_rows(info, spec))
-        pred_btn.click(run_forecast, [pred_station, pred_time],
+        pred_btn.click(run_forecast, [cwa_key, pred_station, pred_time],
                        [pred_head, pred_stats, pred_chart, pred_model, pred_cov])
         pred_station.change(lambda sid: view.forecast_model_md(predict.load_spec(sid)) if sid else "", pred_station,
                             pred_model)
