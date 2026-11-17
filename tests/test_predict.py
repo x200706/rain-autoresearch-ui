@@ -86,3 +86,22 @@ def test_forecast_needs_a_key_for_today_and_merges_realtime_with_it(monkeypatch)
     frame, info = predict.forecast(sid, "2026-11-17 19:00", key="k")
     assert info["realtime_hours"] == 18 and info["last_observed"] == pd.Timestamp("2026-11-17 18:00")
     assert frame["datetime"].iloc[-1] == pd.Timestamp("2026-11-17 19:00") and not np.isnan(info["rain_proba"])
+
+
+def test_snapshot_xml_is_read_like_the_json_api():
+    from rainui import cwa_realtime
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<cwaopendata xmlns="urn:cwa:gov:tw:cwacommon:0.1"><dataset>
+ <Station><StationName>淡水</StationName><StationId>466900</StationId></Station>
+ <Station><StationName>鞍部</StationName><StationId>466910</StationId>
+  <ObsTime><DateTime>2026-11-17T00:00:00+08:00</DateTime></ObsTime>
+  <WeatherElement><Now><Precipitation>2.0</Precipitation></Now><WindDirection>190.0</WindDirection>
+   <WindSpeed>0.9</WindSpeed><AirTemperature>16.3</AirTemperature><RelativeHumidity>100</RelativeHumidity>
+   <AirPressure>923.4</AirPressure><GustInfo><PeakGustSpeed>-99</PeakGustSpeed>
+   <Occurred_at><WindDirection>-99</WindDirection></Occurred_at></GustInfo></WeatherElement>
+ </Station></dataset></cwaopendata>""".encode("utf-8")
+    rows = cwa_realtime._snapshot_rows(xml, "466910")
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["觀測時間(hour)"] == pd.Timestamp("2026-11-17 00:00") and row["_daily_rain"] == 2.0
+    assert row["測站氣壓(hPa)"] == 923.4 and row["最大陣風(m/s)"] is None and row["露點溫度(℃)"] == 16.3

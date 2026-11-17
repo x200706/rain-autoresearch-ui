@@ -1,13 +1,16 @@
 """氣象署開放資料平台的即時觀測，用來補 CoDiS 還沒有的「今天」。需要使用者自己的授權碼（介面輸入，不存檔、不記錄）。
 
 - O-A0001-001「氣象觀測站-全測站逐時氣象資料」：每 10 分鐘更新，只有最新一筆。
-- historyapi「短期過去資料下載」：同一資料集過去各時間點的快照檔，用來拿今天稍早的整點。
+- historyapi「短期過去資料下載」：同一資料集過去 24 小時每個整點的快照檔（XML，全台測站約 1.7 MB），
+  用來拿今天稍早的整點。這支 API 只接受網址參數的授權碼（放 header 會被拒）。
 
 只取整點快照，轉成訓練資料的欄位名稱。這個資料集沒有的欄位（露點以外的日射、地溫、雲量、能見度、
 海平面氣壓等）留空，交給前處理沿用 CoDiS 最後一筆。露點由氣溫與相對溼度算出；逐時雨量由「當日累積雨量」
 相鄰整點相減。
 """
 import math
+import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 import requests
@@ -22,20 +25,52 @@ class RealtimeError(Exception):
     """授權碼錯誤、連不上或格式看不懂；訊息直接顯示給使用者（不含授權碼）。"""
 
 
-def _get(url: str, key: str, params: dict | None = None):
-    # 授權碼放在 HTTP header（平台支援），不放進網址，避免出現在任何紀錄裡
+def _request(url: str, key: str, params: dict | None = None, in_query: bool = False) -> requests.Response:
+    """授權碼預設放 HTTP header；historyapi 只收網址參數。錯誤訊息只寫例外類型，不會帶出含授權碼的網址。"""
+    params = dict(params or {})
+    headers = {}
+    if in_query:
+        params["Authorization"] = key
+    else:
+        headers["Authorization"] = key
     try:
-        resp = requests.get(url, params=params or {}, headers={"Authorization": key}, timeout=TIMEOUT)
+        resp = requests.get(url, params=params, headers=headers, timeout=TIMEOUT)
     except requests.RequestException as exc:
         raise RealtimeError(f"連不上氣象署開放資料平台：{type(exc).__name__}") from None
     if resp.status_code in (401, 403):
         raise RealtimeError("氣象署開放資料授權碼不正確，請到 opendata.cwa.gov.tw 登入後複製授權碼")
     if resp.status_code != 200:
         raise RealtimeError(f"氣象署開放資料平台回應 {resp.status_code}")
+    return resp
+
+
+def _get(url: str, key: str, params: dict | None = None, in_query: bool = False):
     try:
-        return resp.json()
+        return _request(url, key, params, in_query).json()
     except ValueError:
         raise RealtimeError("氣象署開放資料平台回傳的不是 JSON") from None
+
+
+def _xml_to_dict(elem):
+    """XML 元素 → 巢狀 dict（去掉命名空間；重複的子元素只留最後一個，這裡用不到重複的那幾個）。"""
+    children = list(elem)
+    if not children:
+        return (elem.text or "").strip()
+    return {child.tag.split("}")[-1]: _xml_to_dict(child) for child in children}
+
+
+def _snapshot_rows(content: bytes, station: str) -> list[dict]:
+    root = ET.fromstring(content)
+    rows = []
+    for st in root.iter():
+        if st.tag.split("}")[-1] != "Station":
+            continue
+        data = _xml_to_dict(st)
+        if str(data.get("StationId", "")) == station:
+            row = parse_station(data)
+            if row:
+                rows.append(row)
+    return rows
 
 
 def _find(obj, test):
@@ -115,20 +150,22 @@ def latest(key: str, station: str) -> list[dict]:
 
 
 def history(key: str, station: str, start: pd.Timestamp, end: pd.Timestamp) -> list[dict]:
-    """start～end 之間每個整點的快照。一個快照檔包含全部測站，所以只下載整點那幾個。"""
+    """start～end 之間每個整點的快照（平台只留過去 24 小時）。一個快照檔包含全部測站，平行下載。"""
     meta = _get(HISTORY, key, {"format": "JSON", "timeFrom": f"{start:%Y-%m-%dT%H:%M:%S}",
-                               "timeTo": f"{end:%Y-%m-%dT%H:%M:%S}"})
+                               "timeTo": f"{end + pd.Timedelta(hours=1):%Y-%m-%dT%H:%M:%S}"}, in_query=True)
     files = {}
-    for item in _find(meta, lambda d: _key_ci(d, "url") and (_key_ci(d, "DataTime") or _key_ci(d, "dataTime"))):
-        t = pd.Timestamp(_key_ci(item, "DataTime") or _key_ci(item, "dataTime"))
+    for item in _find(meta, lambda d: _key_ci(d, "ProductURL") and _key_ci(d, "DateTime")):
+        t = pd.Timestamp(_key_ci(item, "DateTime"))
         if t.tzinfo is not None:
             t = t.tz_convert("Asia/Taipei").tz_localize(None)
         if t.minute == 0 and start <= t <= end:
-            files[t] = _key_ci(item, "url")
-    rows = []
-    for t in sorted(files):
-        rows += _station_rows(_get(files[t], key), station)
-    return rows
+            files[t] = _key_ci(item, "ProductURL")
+    if not files:
+        return []
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        parts = pool.map(lambda url: _snapshot_rows(_request(url, key, in_query=True).content, station),
+                         [files[t] for t in sorted(files)])
+        return [row for part in parts for row in part]
 
 
 def fetch(key: str, station: str, start, end) -> tuple[pd.DataFrame, list[str]]:

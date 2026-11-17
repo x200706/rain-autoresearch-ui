@@ -297,7 +297,7 @@ def forecast(station: str, target, context: int = 24, key: str = "") -> tuple[pd
             rt, notes = cwa_realtime.fetch(key.strip(), station, codis_last, target)
         except cwa_realtime.RealtimeError as exc:
             raise ForecastError(str(exc)) from None
-        rt = rt[rt["觀測時間(hour)"] > codis_last]
+        rt = rt[rt["觀測時間(hour)"] > codis_last].dropna(axis=1, how="all")
         realtime_hours = int((rt["觀測時間(hour)"] < target).sum())
         raw = pd.concat([raw[raw["觀測時間(hour)"] <= codis_last], rt], ignore_index=True)
         if len(rt):
